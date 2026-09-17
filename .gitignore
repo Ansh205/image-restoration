@@ -1,0 +1,51 @@
+# Model weights (too large for Git)
+*.pth
+*.pt
+*.onnx
+*.safetensors
+checkpoints/
+weights/
+
+# Data
+datasets/
+*.zip
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads/temp
+uploads/
+temp/
+*.tmp
+
+# Secrets
+kaggle.json
+
+# Local guides
+execution_guide.md
+
+# Logs
+logs/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/

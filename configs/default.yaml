@@ -1,0 +1,89 @@
+# ============================================================
+# AI Image Restoration & Enhancement System — Default Config
+# ============================================================
+
+# Device strategy: auto-detect CUDA, fallback to CPU
+device: "auto"  # "auto" | "cuda" | "cpu"
+
+# --- Upload Constraints ---
+upload:
+  max_file_size_mb: 10
+  max_width: 4096
+  max_height: 4096
+  allowed_extensions: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]
+
+# --- Degradation Analyzer Thresholds ---
+# Scores are 0.0–1.0; severity mapped as:
+#   score < low_threshold  → LOW
+#   low_threshold <= score < high_threshold → MEDIUM
+#   score >= high_threshold → HIGH
+analyzer:
+  blur:
+    # Laplacian variance: lower = blurrier
+    # These are inverted internally (low variance = high blur)
+    laplacian_low: 100.0     # Below this → HIGH blur
+    laplacian_high: 300.0    # Above this → LOW blur
+  noise:
+    # Estimated noise sigma
+    low_threshold: 5.0
+    high_threshold: 15.0
+  resolution:
+    # Minimum acceptable dimension (width or height)
+    min_acceptable: 512
+    low_res_threshold: 256
+  low_light:
+    # Mean luminance (0–255 scale)
+    low_threshold: 50.0
+    high_threshold: 80.0
+  jpeg_artifacts:
+    # Blocking artifact strength
+    low_threshold: 0.3
+    high_threshold: 0.6
+
+# --- Pipeline Planner ---
+planner:
+  # Default operation order (validated experimentally)
+  default_order:
+    - "denoise"
+    - "low_light"
+    - "deblur"
+    - "jpeg_artifacts"
+    - "super_resolution"
+  # Minimum severity to trigger a model ("LOW", "MEDIUM", "HIGH")
+  min_severity: "MEDIUM"
+
+# --- Model Configuration ---
+models:
+  denoising:
+    name: "DRUNet"
+    weights_repo: "Ansh205/image-restoration-models"
+    weights_path: "drunet/drunet_color.pth"
+  deblurring:
+    name: "Restormer"
+    weights_repo: "Ansh205/image-restoration-models"
+    weights_path: "restormer/restormer_deraining.pth"
+    use_lora: false
+    lora_path: "restormer-lora/"
+  super_resolution:
+    name: "Real-ESRGAN"
+    weights_repo: "Ansh205/image-restoration-models"
+    weights_path: "realesrgan/RealESRGAN_x4plus.pth"
+    scale_factor: 4
+  low_light:
+    name: "Zero-DCE++"
+    weights_repo: "Ansh205/image-restoration-models"
+    weights_path: "zerodce/zero_dce_pp.pth"
+  jpeg_artifacts:
+    name: "SwinIR"
+    weights_repo: "Ansh205/image-restoration-models"
+    weights_path: "swinir/swinir_jpeg.pth"
+
+# --- Inference ---
+inference:
+  # Max input size for deployment (resize if larger)
+  max_inference_size: 1024
+
+# --- Logging ---
+logging:
+  level: "INFO"
+  log_file: "logs/app.log"

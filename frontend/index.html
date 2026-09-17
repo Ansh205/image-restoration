@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI-powered image restoration that automatically detects and fixes noise, blur, low resolution, poor lighting, and compression artifacts.">
+    <title>AI Image Restoration & Enhancement</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>AI Image Restoration & Enhancement</h1>
+        <p class="subtitle">Upload an image — the system automatically detects degradations and restores it.</p>
+    </header>
+
+    <main>
+        <!-- Upload Section -->
+        <section id="upload-section" class="card">
+            <div id="drop-zone" class="drop-zone">
+                <p>Drag & drop an image here<br>or <strong>click to browse</strong></p>
+                <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
+            </div>
+            <button id="upload-btn" class="btn" disabled>Restore Image</button>
+        </section>
+
+        <!-- Analysis Section (hidden until results) -->
+        <section id="analysis-section" class="card hidden">
+            <h2>Image Analysis</h2>
+            <div id="degradation-report"></div>
+        </section>
+
+        <!-- Pipeline Section (hidden until processing) -->
+        <section id="pipeline-section" class="card hidden">
+            <h2>Restoration Pipeline</h2>
+            <div id="pipeline-steps"></div>
+        </section>
+
+        <!-- Result Section (hidden until done) -->
+        <section id="result-section" class="card hidden">
+            <h2>Result</h2>
+            <div id="comparison-view">
+                <div class="image-panel">
+                    <h3>Original</h3>
+                    <img id="original-image" alt="Original image">
+                </div>
+                <div class="image-panel">
+                    <h3>Restored</h3>
+                    <img id="restored-image" alt="Restored image">
+                </div>
+            </div>
+            <div id="metrics-panel"></div>
+            <button id="download-btn" class="btn">Download Restored Image</button>
+        </section>
+    </main>
+
+    <footer>
+        <p>Built by <a href="https://github.com/Ansh205" target="_blank">Ansh205</a> · 
+           <a href="https://github.com/Ansh205/image-restoration" target="_blank">GitHub</a></p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
