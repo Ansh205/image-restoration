@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.config import load_config
+from app.routes.upload import router as upload_router
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +50,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Register routers
+app.include_router(upload_router)
 
 
 # ---------------------------------------------------------------------------
