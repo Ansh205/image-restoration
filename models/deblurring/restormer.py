@@ -1,0 +1,203 @@
+"""
+Restormer model wrapper for image deblurring.
+
+Restormer is an efficient Transformer-based model for image restoration.
+Supports loading base pretrained weights and optional LoRA PEFT adapters.
+"""
+from typing import Any
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
+from loguru import logger
+
+from models.base import BaseRestorationModel
+from models.utils import get_weights_path
+from core.pipeline.image_utils import pil_to_numpy, numpy_to_pil
+
+
+# ---------------------------------------------------------------------------
+# Restormer Transformer Building Blocks
+# ---------------------------------------------------------------------------
+class MDTA(nn.Module):
+    """Multi-Dconv Head Transposed Attention."""
+    def __init__(self, dim: int = 48, num_heads: int = 4):
+        super().__init__()
+        self.num_heads = num_heads
+        self.qkv = nn.Conv2d(dim, dim * 3, 1, bias=False)
+        self.qkv_dw = nn.Conv2d(dim * 3, dim * 3, 3, padding=1, groups=dim * 3, bias=False)
+        self.project_out = nn.Conv2d(dim, dim, 1, bias=False)
+        self.scale = torch.nn.Parameter(torch.ones(num_heads, 1, 1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        qkv = self.qkv_dw(self.qkv(x))
+        q, k, v = qkv.chunk(3, dim=1)
+
+        q = q.view(b, self.num_heads, c // self.num_heads, h * w)
+        k = k.view(b, self.num_heads, c // self.num_heads, h * w)
+        v = v.view(b, self.num_heads, c // self.num_heads, h * w)
+
+        q = torch.nn.functional.normalize(q, dim=-1)
+        k = torch.nn.functional.normalize(k, dim=-1)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+
+        out = (attn @ v).view(b, c, h, w)
+        out = self.project_out(out)
+        return out
+
+
+class GDFN(nn.Module):
+    """Gated-Dconv Feed-Forward Network."""
+    def __init__(self, dim: int = 48, ffn_expansion_factor: float = 2.66):
+        super().__init__()
+        hidden_dim = int(dim * ffn_expansion_factor)
+        self.project_in = nn.Conv2d(dim, hidden_dim * 2, 1, bias=False)
+        self.dwconv = nn.Conv2d(hidden_dim * 2, hidden_dim * 2, 3, padding=1, groups=hidden_dim * 2, bias=False)
+        self.project_out = nn.Conv2d(hidden_dim, dim, 1, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x1, x2 = self.dwconv(self.project_in(x)).chunk(2, dim=1)
+        x = F.gelu(x1) * x2
+        x = self.project_out(x)
+        return x
+
+
+class TransformerBlock(nn.Module):
+    def __init__(self, dim: int = 48, num_heads: int = 4):
+        super().__init__()
+        self.norm1 = nn.GroupNorm(1, dim)
+        self.attn = MDTA(dim, num_heads)
+        self.norm2 = nn.GroupNorm(1, dim)
+        self.ffn = GDFN(dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x))
+        x = x + self.ffn(self.norm2(x))
+        return x
+
+
+class RestormerArch(nn.Module):
+    """Restormer Transformer architecture for image deblurring."""
+    def __init__(self, in_nc: int = 3, out_nc: int = 3, dim: int = 48, num_blocks: list[int] | None = None):
+        super().__init__()
+        num_blocks = num_blocks or [2, 3, 3, 4]
+        heads = [1, 2, 4, 8]
+
+        self.patch_embed = nn.Conv2d(in_nc, dim, 3, padding=1, bias=False)
+
+        # Encoder Level 1
+        self.encoder_level1 = nn.Sequential(*[TransformerBlock(dim, heads[0]) for _ in range(num_blocks[0])])
+
+        # Down 1 -> Level 2
+        self.down1_2 = nn.Conv2d(dim, dim * 2, 2, stride=2, bias=False)
+        self.encoder_level2 = nn.Sequential(*[TransformerBlock(dim * 2, heads[1]) for _ in range(num_blocks[1])])
+
+        # Down 2 -> Level 3
+        self.down2_3 = nn.Conv2d(dim * 2, dim * 4, 2, stride=2, bias=False)
+        self.encoder_level3 = nn.Sequential(*[TransformerBlock(dim * 4, heads[2]) for _ in range(num_blocks[2])])
+
+        # Decoder Level 3 -> Up 2
+        self.up3_2 = nn.ConvTranspose2d(dim * 4, dim * 2, 2, stride=2, bias=False)
+        self.reduce_chan2 = nn.Conv2d(dim * 4, dim * 2, 1, bias=False)
+        self.decoder_level2 = nn.Sequential(*[TransformerBlock(dim * 2, heads[1]) for _ in range(num_blocks[1])])
+
+        # Up 1 -> Level 1
+        self.up2_1 = nn.ConvTranspose2d(dim * 2, dim, 2, stride=2, bias=False)
+        self.reduce_chan1 = nn.Conv2d(dim * 2, dim, 1, bias=False)
+        self.decoder_level1 = nn.Sequential(*[TransformerBlock(dim, heads[0]) for _ in range(num_blocks[0])])
+
+        self.output = nn.Conv2d(dim, out_nc, 3, padding=1, bias=False)
+
+    def forward(self, inp: torch.Tensor) -> torch.Tensor:
+        fo = self.patch_embed(inp)
+        out_enc1 = self.encoder_level1(fo)
+
+        inp_enc2 = self.down1_2(out_enc1)
+        out_enc2 = self.encoder_level2(inp_enc2)
+
+        inp_enc3 = self.down2_3(out_enc2)
+        out_enc3 = self.encoder_level3(inp_enc3)
+
+        inp_dec2 = self.up3_2(out_enc3)
+        inp_dec2 = self.reduce_chan2(torch.cat([inp_dec2, out_enc2], dim=1))
+        out_dec2 = self.decoder_level2(inp_dec2)
+
+        inp_dec1 = self.up2_1(out_dec2)
+        inp_dec1 = self.reduce_chan1(torch.cat([inp_dec1, out_enc1], dim=1))
+        out_dec1 = self.decoder_level1(inp_dec1)
+
+        out = self.output(out_dec1) + inp
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Restormer Wrapper Class
+# ---------------------------------------------------------------------------
+class RestormerModel(BaseRestorationModel):
+    """
+    Restormer deblurring model wrapper.
+    Supports base model weights and optional LoRA PEFT adapters.
+    """
+
+    def load(self) -> None:
+        self.model = RestormerArch(dim=48).to(self.device)
+        self.model.eval()
+
+        repo_id = self.config.get("weights_repo", "Ansh205/image-restoration-models")
+        weights_path = self.config.get("weights_path", "restormer/restormer_deraining.pth")
+
+        local_weights = get_weights_path(repo_id, weights_path)
+        if local_weights.exists():
+            try:
+                state_dict = torch.load(str(local_weights), map_location=self.device)
+                self.model.load_state_dict(state_dict, strict=False)
+                logger.info(f"Loaded Restormer base weights from {local_weights}")
+            except Exception as e:
+                logger.warning(f"Failed to load Restormer checkpoint state dict: {e}")
+
+        # Check if LoRA is requested
+        if self.config.get("use_lora", False):
+            lora_path = self.config.get("lora_path", "restormer-lora/")
+            self._load_lora_adapter(repo_id, lora_path)
+
+        self._loaded = True
+
+    def _load_lora_adapter(self, repo_id: str, lora_path: str) -> None:
+        """Load LoRA PEFT adapter weights if available."""
+        try:
+            from peft import PeftModel
+            local_lora = get_weights_path(repo_id, f"{lora_path}adapter_model.bin")
+            if local_lora.exists():
+                self.model = PeftModel.from_pretrained(self.model, str(local_lora.parent))
+                logger.info("Successfully attached LoRA adapter to Restormer")
+        except Exception as e:
+            logger.warning(f"Could not load LoRA adapter for Restormer: {e}")
+
+    def restore(self, image: Image.Image) -> Image.Image:
+        self.ensure_loaded()
+
+        np_img = pil_to_numpy(image)
+        h, w, _ = np_img.shape
+
+        # Pad for 2-level downsampling (multiple of 4)
+        pad_h = (4 - h % 4) % 4
+        pad_w = (4 - w % 4) % 4
+        if pad_h > 0 or pad_w > 0:
+            np_img = np.pad(np_img, ((0, pad_h), (0, pad_w), (0, 0)), mode="reflect")
+
+        tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            output_tensor = self.model(tensor_img)
+            output_tensor = torch.clamp(output_tensor, 0.0, 1.0)
+
+        output_np = output_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
+
+        if pad_h > 0 or pad_w > 0:
+            output_np = output_np[:h, :w, :]
+
+        return numpy_to_pil(output_np)

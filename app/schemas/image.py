@@ -39,10 +39,15 @@ class DegradationItem(BaseModel):
 
 class AnalysisResponse(BaseModel):
     """Response containing the degradation analysis."""
+    image_id: str = Field(default="", description="Unique image identifier")
     degradations: list[DegradationItem]
     pipeline: list[str] = Field(
         default_factory=list,
         description="Ordered list of operations to apply"
+    )
+    raw_metrics: dict = Field(
+        default_factory=dict,
+        description="Raw numerical values from detectors"
     )
 
 
