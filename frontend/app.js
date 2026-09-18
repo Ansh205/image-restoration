@@ -1,6 +1,6 @@
 /**
  * AI Image Restoration — Frontend Logic
- * Phase 4: Combined Upload & Degradation Analysis
+ * Phase 5: Complete Upload, Analyze, Pipeline Routing, & Restoration
  */
 
 const dropZone = document.getElementById('drop-zone');
@@ -54,12 +54,12 @@ function handleFileSelect(file) {
     uploadBtn.disabled = false;
 }
 
-// --- Upload & Analyze Handling ---
+// --- Upload, Analyze, & Restore Flow ---
 uploadBtn.addEventListener('click', async () => {
     if (!selectedFile) return;
 
     uploadBtn.disabled = true;
-    uploadBtn.textContent = 'Processing & Analyzing...';
+    uploadBtn.textContent = 'Uploading & Validating...';
 
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -81,6 +81,7 @@ uploadBtn.addEventListener('click', async () => {
         const imageId = uploadData.image_id;
 
         // 2. Analyze Image Degradations
+        uploadBtn.textContent = 'Running Degradation Analyzer...';
         const analyzeResp = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -88,12 +89,27 @@ uploadBtn.addEventListener('click', async () => {
         });
 
         const analyzeData = await analyzeResp.json();
-
-        // 3. Render Results on UI
         renderAnalysisReport(uploadData, analyzeData);
 
+        // 3. Execute Restoration Pipeline
+        uploadBtn.textContent = 'Running Pipeline Restoration...';
+        const restoreResp = await fetch('/api/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_id: imageId }),
+        });
+
+        const restoreData = await restoreResp.json();
+
+        if (restoreResp.ok && restoreData.success) {
+            renderPipelineSteps(restoreData.pipeline_steps, restoreData.inference_time_seconds);
+            renderResultComparison(imageId, restoreData);
+        } else {
+            alert(`Restoration error: ${restoreData.detail || 'Failed to restore image'}`);
+        }
+
     } catch (err) {
-        console.error('Error during upload & analysis:', err);
+        console.error('Error during upload, analysis, or restoration:', err);
         alert('Error connecting to backend API: ' + err.message);
     } finally {
         uploadBtn.disabled = false;
@@ -101,6 +117,7 @@ uploadBtn.addEventListener('click', async () => {
     }
 });
 
+// --- Render Functions ---
 function renderAnalysisReport(uploadData, analyzeData) {
     const analysisSection = document.getElementById('analysis-section');
     const reportDiv = document.getElementById('degradation-report');
@@ -111,14 +128,13 @@ function renderAnalysisReport(uploadData, analyzeData) {
     const degradations = analyzeData.degradations || [];
     const metrics = analyzeData.raw_metrics || {};
 
-    // Generate Badges for Detected Degradations
     let degradationsHtml = '';
     if (degradations.length === 0) {
         degradationsHtml = `<p style="color: var(--success); font-weight: 600;">✨ No major degradations detected (Image appears clean)</p>`;
     } else {
         degradationsHtml = '<div class="degradation-list">';
         degradations.forEach(deg => {
-            const sevClass = deg.severity.toLowerCase(); // 'low', 'medium', 'high'
+            const sevClass = deg.severity.toLowerCase();
             degradationsHtml += `
                 <div class="deg-card deg-${sevClass}">
                     <span class="deg-name">${deg.name.replace('_', ' ').toUpperCase()}</span>
@@ -129,7 +145,6 @@ function renderAnalysisReport(uploadData, analyzeData) {
         degradationsHtml += '</div>';
     }
 
-    // Format raw metrics table
     const metricsHtml = `
         <div class="metrics-grid">
             <div class="metric-box">
@@ -169,4 +184,85 @@ function renderAnalysisReport(uploadData, analyzeData) {
             ${metricsHtml}
         </div>
     `;
+}
+
+function renderPipelineSteps(steps, totalTime) {
+    const pipelineSection = document.getElementById('pipeline-section');
+    const stepsDiv = document.getElementById('pipeline-steps');
+
+    pipelineSection.classList.remove('hidden');
+
+    if (!steps || steps.length === 0) {
+        stepsDiv.innerHTML = `<p style="color: var(--text-secondary);">No restoration steps required. Original image retained.</p>`;
+        return;
+    }
+
+    let stepsHtml = '<div class="pipeline-flow">';
+    steps.forEach(step => {
+        stepsHtml += `
+            <div class="step-card">
+                <div class="step-num">Step ${step.step_number}</div>
+                <div class="step-details">
+                    <span class="step-op">${step.operation.replace('_', ' ').toUpperCase()}</span>
+                    <span class="step-model">Model: ${step.model_name}</span>
+                </div>
+                <div class="step-meta">
+                    <span>⚡ ${step.execution_time_seconds}s</span>
+                    <span>${step.input_size} → ${step.output_size}</span>
+                </div>
+            </div>
+        `;
+    });
+    stepsHtml += `</div>
+        <p class="pipeline-total">Total Pipeline Execution Time: <strong>${totalTime.toFixed(2)} seconds</strong></p>
+    `;
+
+    stepsDiv.innerHTML = stepsHtml;
+}
+
+function renderResultComparison(imageId, restoreData) {
+    const resultSection = document.getElementById('result-section');
+    const origImgElem = document.getElementById('original-image');
+    const restImgElem = document.getElementById('restored-image');
+    const metricsPanel = document.getElementById('metrics-panel');
+    const downloadBtn = document.getElementById('download-btn');
+
+    resultSection.classList.remove('hidden');
+
+    // Set Image URLs
+    const origUrl = `/api/image/${imageId}`;
+    const restoredUrl = `/api/image/restored_${imageId}`;
+
+    origImgElem.src = origUrl;
+    restImgElem.src = restoredUrl;
+
+    const m = restoreData.metrics || {};
+    metricsPanel.innerHTML = `
+        <div class="quality-metrics-box">
+            <div class="q-item">
+                <span class="q-label">Sharpness Change</span>
+                <span class="q-val">${m.sharpness_change_percent ?? 0}%</span>
+            </div>
+            <div class="q-item">
+                <span class="q-label">Original Resolution</span>
+                <span class="q-val">${restoreData.original_meta.width} x ${restoreData.original_meta.height}</span>
+            </div>
+            <div class="q-item">
+                <span class="q-label">Restored Resolution</span>
+                <span class="q-val">${restoreData.restored_meta.width} x ${restoreData.restored_meta.height}</span>
+            </div>
+        </div>
+    `;
+
+    // Download Button setup
+    downloadBtn.onclick = () => {
+        const a = document.createElement('a');
+        a.href = restoredUrl;
+        a.download = `restored_${restoreData.original_meta.filename}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+    resultSection.scrollIntoView({ behavior: 'smooth' });
 }

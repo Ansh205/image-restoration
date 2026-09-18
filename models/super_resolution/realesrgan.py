@@ -92,6 +92,10 @@ class RealESRGANModel(BaseRestorationModel):
     Upscales PIL Image 4x.
     """
 
+    def __init__(self, config: dict[str, Any] | None = None, device: str | None = None):
+        super().__init__(config, device)
+        self.has_weights: bool = False
+
     def load(self) -> None:
         self.model = RealESRGANArch(scale=4, nb=6).to(self.device)
         self.model.eval()
@@ -106,14 +110,24 @@ class RealESRGANModel(BaseRestorationModel):
                 if "params_strict" in state_dict:
                     state_dict = state_dict["params_strict"]
                 self.model.load_state_dict(state_dict, strict=False)
+                self.has_weights = True
                 logger.info(f"Loaded Real-ESRGAN weights from {local_weights}")
             except Exception as e:
                 logger.warning(f"Failed to load Real-ESRGAN checkpoint state dict: {e}")
+                self.has_weights = False
+        else:
+            self.has_weights = False
 
         self._loaded = True
 
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
+
+        if not self.has_weights:
+            logger.info("RealESRGAN using high-quality Lanczos 4x upscaling fallback")
+            target_w = image.width * 4
+            target_h = image.height * 4
+            return image.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
         np_img = pil_to_numpy(image)
         tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)

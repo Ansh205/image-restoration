@@ -59,6 +59,14 @@ class BaseRestorationModel(ABC):
         """
         pass
 
+    def predict(self, image: Image.Image) -> Image.Image:
+        """Alias for restore() to support standard model inference API."""
+        return self.restore(image)
+
+    def __call__(self, image: Image.Image) -> Image.Image:
+        """Allow calling instance directly as a function."""
+        return self.restore(image)
+
     def ensure_loaded(self) -> None:
         """Load the model if not already loaded."""
         if not self._loaded:

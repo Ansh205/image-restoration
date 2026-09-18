@@ -22,6 +22,7 @@ MODEL_REGISTRY: dict[str, Type[BaseRestorationModel]] = {
     "deblur": RestormerModel,
     "super_resolution": RealESRGANModel,
     "low_light": ZeroDCEModel,
+    "jpeg": SwinIRModel,
     "jpeg_artifacts": SwinIRModel,
 }
 

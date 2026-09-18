@@ -100,14 +100,22 @@ class DRUNetModel(BaseRestorationModel):
             try:
                 state_dict = torch.load(str(local_weights), map_location=self.device)
                 self.model.load_state_dict(state_dict, strict=False)
+                self.has_weights = True
                 logger.info(f"Loaded DRUNet weights from {local_weights}")
             except Exception as e:
                 logger.warning(f"Failed to load DRUNet checkpoint state dict: {e}")
+                self.has_weights = False
+        else:
+            self.has_weights = False
 
         self._loaded = True
 
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
+
+        if not self.has_weights:
+            logger.info("DRUNet using identity passthrough fallback")
+            return image
 
         np_img = pil_to_numpy(image)  # (H, W, 3) float32 [0, 1]
         h, w, _ = np_img.shape

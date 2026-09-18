@@ -39,11 +39,11 @@ class DegradationAnalyzer:
         full_cfg = config or load_config()
         self.cfg = full_cfg.get("analyzer", {})
 
-        self.blur_thresh = float(self.cfg.get("blur_laplacian_threshold", 100.0))
-        self.noise_thresh = float(self.cfg.get("noise_sigma_threshold", 15.0))
+        self.blur_thresh = float(self.cfg.get("blur_laplacian_threshold", 250.0))
+        self.noise_thresh = float(self.cfg.get("noise_sigma_threshold", 2.0))
         self.min_dim = int(self.cfg.get("min_dimension", 512))
         self.low_light_thresh = float(self.cfg.get("low_light_mean_threshold", 0.35))
-        self.jpeg_thresh = float(self.cfg.get("jpeg_artifact_threshold", 0.40))
+        self.jpeg_thresh = float(self.cfg.get("jpeg_artifact_threshold", 0.05))
 
     def analyze(self, image: Image.Image, image_id: str = "") -> AnalysisResponse:
         """

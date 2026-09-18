@@ -9,7 +9,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image
+from PIL import Image, ImageFilter
 from loguru import logger
 
 from models.base import BaseRestorationModel
@@ -143,6 +143,10 @@ class RestormerModel(BaseRestorationModel):
     Supports base model weights and optional LoRA PEFT adapters.
     """
 
+    def __init__(self, config: dict[str, Any] | None = None, device: str | None = None):
+        super().__init__(config, device)
+        self.has_weights: bool = False
+
     def load(self) -> None:
         self.model = RestormerArch(dim=48).to(self.device)
         self.model.eval()
@@ -155,9 +159,13 @@ class RestormerModel(BaseRestorationModel):
             try:
                 state_dict = torch.load(str(local_weights), map_location=self.device)
                 self.model.load_state_dict(state_dict, strict=False)
+                self.has_weights = True
                 logger.info(f"Loaded Restormer base weights from {local_weights}")
             except Exception as e:
                 logger.warning(f"Failed to load Restormer checkpoint state dict: {e}")
+                self.has_weights = False
+        else:
+            self.has_weights = False
 
         # Check if LoRA is requested
         if self.config.get("use_lora", False):
@@ -179,6 +187,10 @@ class RestormerModel(BaseRestorationModel):
 
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
+
+        if not self.has_weights:
+            logger.info("Restormer using PIL sharpen filter fallback")
+            return image.filter(ImageFilter.SHARPEN)
 
         np_img = pil_to_numpy(image)
         h, w, _ = np_img.shape

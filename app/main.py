@@ -15,6 +15,7 @@ from loguru import logger
 from app.config import load_config
 from app.routes.upload import router as upload_router
 from app.routes.analyze import router as analyze_router
+from app.routes.restore import router as restore_router
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ app = FastAPI(
 # Register routers
 app.include_router(upload_router)
 app.include_router(analyze_router)
+app.include_router(restore_router)
 
 
 # ---------------------------------------------------------------------------

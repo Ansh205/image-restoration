@@ -11,7 +11,7 @@ from PIL import Image
 from loguru import logger
 
 
-def detect_blur(image: Image.Image, threshold: float = 100.0) -> Tuple[bool, float, float]:
+def detect_blur(image: Image.Image, threshold: float = 250.0) -> Tuple[bool, float, float]:
     """
     Detect blur using Laplacian variance on the grayscale image.
 
@@ -29,8 +29,11 @@ def detect_blur(image: Image.Image, threshold: float = 100.0) -> Tuple[bool, flo
     else:
         gray = np_img
 
+    # Apply mild Gaussian blur to suppress high-frequency noise prior to measuring structural blur
+    smoothed = cv2.GaussianBlur(gray, (3, 3), 0)
+    
     # Compute Laplacian variance
-    laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    laplacian_var = float(cv2.Laplacian(smoothed, cv2.CV_64F).var())
 
     is_blurry = laplacian_var < threshold
 

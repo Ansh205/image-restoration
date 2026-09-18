@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from PIL import Image
+from PIL import Image, ImageEnhance
 from loguru import logger
 
 from models.base import BaseRestorationModel
@@ -76,6 +76,10 @@ class ZeroDCEModel(BaseRestorationModel):
     Estimates enhancement curves to brighten low-light PIL Images.
     """
 
+    def __init__(self, config: dict[str, Any] | None = None, device: str | None = None):
+        super().__init__(config, device)
+        self.has_weights: bool = False
+
     def load(self) -> None:
         self.model = ZeroDCEPlusPlusArch(number_f=32, iteration=8).to(self.device)
         self.model.eval()
@@ -88,14 +92,23 @@ class ZeroDCEModel(BaseRestorationModel):
             try:
                 state_dict = torch.load(str(local_weights), map_location=self.device)
                 self.model.load_state_dict(state_dict, strict=False)
+                self.has_weights = True
                 logger.info(f"Loaded Zero-DCE++ weights from {local_weights}")
             except Exception as e:
                 logger.warning(f"Failed to load Zero-DCE++ checkpoint state dict: {e}")
+                self.has_weights = False
+        else:
+            self.has_weights = False
 
         self._loaded = True
 
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
+
+        if not self.has_weights:
+            logger.info("Zero-DCE++ using PIL Brightness enhancement fallback")
+            enhancer = ImageEnhance.Brightness(image)
+            return enhancer.enhance(1.25)
 
         np_img = pil_to_numpy(image)
         tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)

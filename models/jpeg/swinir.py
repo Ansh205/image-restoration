@@ -96,14 +96,22 @@ class SwinIRModel(BaseRestorationModel):
                 if "params" in state_dict:
                     state_dict = state_dict["params"]
                 self.model.load_state_dict(state_dict, strict=False)
+                self.has_weights = True
                 logger.info(f"Loaded SwinIR weights from {local_weights}")
             except Exception as e:
                 logger.warning(f"Failed to load SwinIR checkpoint state dict: {e}")
+                self.has_weights = False
+        else:
+            self.has_weights = False
 
         self._loaded = True
 
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
+
+        if not self.has_weights:
+            logger.info("SwinIR using identity passthrough fallback")
+            return image
 
         np_img = pil_to_numpy(image)
         tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
