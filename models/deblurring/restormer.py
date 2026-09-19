@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image, ImageFilter
+import numpy as np
 from loguru import logger
 
 from models.base import BaseRestorationModel
@@ -111,6 +112,7 @@ class RestormerArch(nn.Module):
         self.decoder_level1 = nn.Sequential(*[TransformerBlock(dim, heads[0]) for _ in range(num_blocks[0])])
 
         self.output = nn.Conv2d(dim, out_nc, 3, padding=1, bias=False)
+        nn.init.zeros_(self.output.weight)
 
     def forward(self, inp: torch.Tensor) -> torch.Tensor:
         fo = self.patch_embed(inp)
@@ -134,6 +136,9 @@ class RestormerArch(nn.Module):
         return out
 
 
+import cv2
+
+
 # ---------------------------------------------------------------------------
 # Restormer Wrapper Class
 # ---------------------------------------------------------------------------
@@ -152,15 +157,22 @@ class RestormerModel(BaseRestorationModel):
         self.model.eval()
 
         repo_id = self.config.get("weights_repo", "Ansh205/image-restoration-models")
-        weights_path = self.config.get("weights_path", "restormer/restormer_deraining.pth")
+        weights_path = self.config.get("weights_path", "restormer/restormer_deblurring.pth")
 
         local_weights = get_weights_path(repo_id, weights_path)
         if local_weights.exists():
             try:
                 state_dict = torch.load(str(local_weights), map_location=self.device)
                 self.model.load_state_dict(state_dict, strict=False)
-                self.has_weights = True
-                logger.info(f"Loaded Restormer base weights from {local_weights}")
+                
+                # Check if output weights are all zeros (dummy initial state dict)
+                out_w = self.model.output.weight
+                if torch.all(out_w == 0):
+                    logger.warning("Restormer checkpoint has zero-initialized output weights (dummy initialized state dict). Fallback active.")
+                    self.has_weights = False
+                else:
+                    self.has_weights = True
+                    logger.info(f"Loaded Restormer pretrained weights from {local_weights}")
             except Exception as e:
                 logger.warning(f"Failed to load Restormer checkpoint state dict: {e}")
                 self.has_weights = False
@@ -188,28 +200,72 @@ class RestormerModel(BaseRestorationModel):
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
 
+        # Compute BEFORE stats
+        np_before = pil_to_numpy(image) * 255.0  # [0, 255] float
+        h, w, _ = np_before.shape
+
+        gray_before = cv2.cvtColor(np_before.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        lap_before = float(cv2.Laplacian(gray_before, cv2.CV_64F).var())
+        sobelx_b = cv2.Sobel(gray_before, cv2.CV_64F, 1, 0, ksize=3)
+        sobely_b = cv2.Sobel(gray_before, cv2.CV_64F, 0, 1, ksize=3)
+        tenengrad_before = float(np.mean(sobelx_b**2 + sobely_b**2))
+
+        logger.debug(
+            f"[RESTORMER BEFORE] Range: [{np_before.min():.1f}, {np_before.max():.1f}] | "
+            f"Mean: {np_before.mean():.2f}, Std: {np_before.std():.2f} | "
+            f"Laplacian: {lap_before:.3f}, Tenengrad: {tenengrad_before:.3f}"
+        )
+
         if not self.has_weights:
-            logger.info("Restormer using PIL sharpen filter fallback")
-            return image.filter(ImageFilter.SHARPEN)
+            logger.info("Restormer using high-pass sharpening filter fallback for deblurring")
+            # Unsharp mask high-pass sharpening to recover edge contrast
+            blurred = image.filter(ImageFilter.GaussianBlur(radius=1.5))
+            np_orig = np.array(image, dtype=np.float32)
+            np_blur = np.array(blurred, dtype=np.float32)
+            np_sharp = np.clip(np_orig + 1.2 * (np_orig - np_blur), 0, 255).astype(np.uint8)
+            restored_img = Image.fromarray(np_sharp)
+        else:
+            np_img = pil_to_numpy(image)
+            # Pad for 2-level downsampling (multiple of 4)
+            pad_h = (4 - h % 4) % 4
+            pad_w = (4 - w % 4) % 4
+            if pad_h > 0 or pad_w > 0:
+                np_img = np.pad(np_img, ((0, pad_h), (0, pad_w), (0, 0)), mode="reflect")
 
-        np_img = pil_to_numpy(image)
-        h, w, _ = np_img.shape
+            tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
 
-        # Pad for 2-level downsampling (multiple of 4)
-        pad_h = (4 - h % 4) % 4
-        pad_w = (4 - w % 4) % 4
-        if pad_h > 0 or pad_w > 0:
-            np_img = np.pad(np_img, ((0, pad_h), (0, pad_w), (0, 0)), mode="reflect")
+            with torch.no_grad():
+                output_tensor = self.model(tensor_img)
+                output_tensor = torch.clamp(output_tensor, 0.0, 1.0)
 
-        tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            output_np = output_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
+            if pad_h > 0 or pad_w > 0:
+                output_np = output_np[:h, :w, :]
 
-        with torch.no_grad():
-            output_tensor = self.model(tensor_img)
-            output_tensor = torch.clamp(output_tensor, 0.0, 1.0)
+            restored_img = numpy_to_pil(output_np)
 
-        output_np = output_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        # Compute AFTER stats
+        np_after = pil_to_numpy(restored_img) * 255.0
+        gray_after = cv2.cvtColor(np_after.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        lap_after = float(cv2.Laplacian(gray_after, cv2.CV_64F).var())
+        sobelx_a = cv2.Sobel(gray_after, cv2.CV_64F, 1, 0, ksize=3)
+        sobely_a = cv2.Sobel(gray_after, cv2.CV_64F, 0, 1, ksize=3)
+        tenengrad_after = float(np.mean(sobelx_a**2 + sobely_a**2))
 
-        if pad_h > 0 or pad_w > 0:
-            output_np = output_np[:h, :w, :]
+        diff = np.abs(np_after - np_before)
+        mad = float(np.mean(diff))
+        max_diff = float(np.max(diff))
+        changed_pct = float(np.mean(diff > 1.0) * 100.0)
 
-        return numpy_to_pil(output_np)
+        lap_change_pct = ((lap_after - lap_before) / max(lap_before, 1e-5)) * 100.0
+        tenengrad_change_pct = ((tenengrad_after - tenengrad_before) / max(tenengrad_before, 1e-5)) * 100.0
+
+        logger.info(
+            f"[RESTORMER AFTER] Range: [{np_after.min():.1f}, {np_after.max():.1f}] | "
+            f"Mean: {np_after.mean():.2f}, Std: {np_after.std():.2f} | "
+            f"Laplacian: {lap_before:.2f} -> {lap_after:.2f} ({lap_change_pct:+.2f}%) | "
+            f"Tenengrad: {tenengrad_before:.2f} -> {tenengrad_after:.2f} ({tenengrad_change_pct:+.2f}%) | "
+            f"MAD: {mad:.3f}, MaxDiff: {max_diff:.1f}, ChangedPixels: {changed_pct:.2f}%"
+        )
+
+        return restored_img

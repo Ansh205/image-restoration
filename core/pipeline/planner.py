@@ -37,6 +37,7 @@ class PipelinePlanner:
         self,
         analysis: AnalysisResponse,
         custom_operations: Optional[List[str]] = None,
+        min_severity: str = "LOW",
     ) -> List[str]:
         """
         Generate an ordered list of operation names.
@@ -44,6 +45,7 @@ class PipelinePlanner:
         Args:
             analysis: Structured degradation report from DegradationAnalyzer.
             custom_operations: Optional list of specific operations requested by the user.
+            min_severity: Minimum degradation severity to schedule model ("LOW", "MEDIUM", or "HIGH").
 
         Returns:
             List of operation names ordered by the canonical restoration pipeline rules.
@@ -58,15 +60,34 @@ class PipelinePlanner:
                     ordered_custom.append(op)
             return ordered_custom
 
-        # Extract operation names from detected degradations
+        severity_rank = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+        min_rank = severity_rank.get(min_severity.upper(), 1)
+
+        # Extract operation names from detected degradations that meet minimum severity & restoration_required threshold
         required_ops = set()
         for deg in analysis.degradations:
+            deg_rank = severity_rank.get(str(deg.severity).upper(), 1)
             op = DEGRADATION_TO_OPERATION.get(deg.name)
+
+            if hasattr(deg, "detected") and not deg.detected:
+                logger.info(f"Skipping '{deg.name}': Not detected.")
+                continue
+
+            # Special policy for JPEG artifacts: require score >= 0.50 or MEDIUM/HIGH severity
+            if deg.name == "jpeg_artifacts" and deg.score < 0.50:
+                logger.info(f"Skipping 'jpeg_artifacts' (Score: {deg.score:.2f}, Severity: {deg.severity}): Below restoration_required threshold (0.50).")
+                continue
+
+            if deg_rank < min_rank:
+                logger.info(f"Skipping '{deg.name}' (Severity: {deg.severity}, Score: {deg.score:.2f}): Below minimum threshold '{min_severity}'.")
+                continue
+
             if op:
+                logger.info(f"Scheduling '{op}' for degradation '{deg.name}' (Severity: {deg.severity}, Score: {deg.score:.2f}, restoration_required=True).")
                 required_ops.add(op)
 
         if not required_ops:
-            logger.info("No degradations detected. Pipeline is empty.")
+            logger.info("No degradations above threshold. Pipeline is empty.")
             return []
 
         # Order detected operations using canonical order

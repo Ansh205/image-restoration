@@ -9,6 +9,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from PIL import Image
+import numpy as np
 from loguru import logger
 
 from models.base import BaseRestorationModel
@@ -57,6 +58,9 @@ class DRUNetArch(nn.Module):
 
         # Output
         self.tail = nn.Conv2d(nc[0], out_nc, 3, padding=1)
+        nn.init.zeros_(self.tail.weight)
+        if self.tail.bias is not None:
+            nn.init.zeros_(self.tail.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.head(x)
@@ -71,7 +75,8 @@ class DRUNetArch(nn.Module):
         u1 = self.up1(d2)
         d1 = self.dec1(u1 + e1)
 
-        out = self.tail(d1)
+        res = self.tail(d1)
+        out = x[:, :3, :, :] + res
         return out
 
 

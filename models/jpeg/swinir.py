@@ -65,6 +65,9 @@ class SwinIRArch(nn.Module):
         self.conv_after_body = nn.Conv2d(embed_dim, embed_dim, 3, padding=1)
 
         self.conv_last = nn.Conv2d(embed_dim, out_nc, 3, padding=1)
+        nn.init.zeros_(self.conv_last.weight)
+        if self.conv_last.bias is not None:
+            nn.init.zeros_(self.conv_last.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         fea = self.conv_first(x)

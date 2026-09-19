@@ -45,6 +45,9 @@ class ZeroDCEPlusPlusArch(nn.Module):
         self.e_conv5 = CNet(number_f * 2, number_f)
         self.e_conv6 = CNet(number_f * 2, number_f)
         self.e_conv7 = nn.Conv2d(number_f * 2, 3, kernel_size=3, padding=1, bias=True)
+        nn.init.zeros_(self.e_conv7.weight)
+        if self.e_conv7.bias is not None:
+            nn.init.zeros_(self.e_conv7.bias)
 
     def enhance(self, x: torch.Tensor, A: torch.Tensor) -> torch.Tensor:
         """Apply curve enhancement iteratively: LE(x) = x + A*x*(1-x)."""

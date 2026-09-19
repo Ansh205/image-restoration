@@ -71,7 +71,12 @@ async def restore_image(req: RestoreRequest) -> RestorationResponse:
     )
 
     # 3. Execute restoration engine
-    engine_result = engine_instance.run(pil_img, planned_operations)
+    original_img = stored["original"]
+    engine_result = engine_instance.run(
+        image=pil_img,
+        operations=planned_operations,
+        original_image=original_img,
+    )
     restored_img = engine_result.final_image
 
     # 4. Generate restored image metadata & store in memory

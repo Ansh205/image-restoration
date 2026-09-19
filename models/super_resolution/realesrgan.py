@@ -67,6 +67,9 @@ class RealESRGANArch(nn.Module):
         self.conv_up2 = nn.Conv2d(nf, nf, 3, 1, 1)
         self.conv_hr = nn.Conv2d(nf, nf, 3, 1, 1)
         self.conv_last = nn.Conv2d(nf, out_nc, 3, 1, 1)
+        nn.init.zeros_(self.conv_last.weight)
+        if self.conv_last.bias is not None:
+            nn.init.zeros_(self.conv_last.bias)
         self.lrelu = nn.LeakyReLU(0.2, inplace=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -79,7 +82,9 @@ class RealESRGANArch(nn.Module):
         # 4x upsampling
         fea = self.lrelu(self.conv_up2(torch.nn.functional.interpolate(fea, scale_factor=2, mode="nearest")))
 
-        out = self.conv_last(self.lrelu(self.conv_hr(fea)))
+        res = self.conv_last(self.lrelu(self.conv_hr(fea)))
+        base_upscale = torch.nn.functional.interpolate(x, scale_factor=self.scale, mode="bilinear", align_corners=False)
+        out = base_upscale + res
         return out
 
 

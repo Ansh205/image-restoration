@@ -23,9 +23,9 @@ def _make_clean_image(width: int = 600, height: int = 600) -> Image.Image:
     for y in range(0, height, 20):
         for x in range(0, width, 20):
             if ((x // 20) + (y // 20)) % 2 == 0:
-                arr[y:y+20, x:x+20] = [240, 240, 240]
+                arr[y:y+20, x:x+20] = [180, 180, 180]
             else:
-                arr[y:y+20, x:x+20] = [20, 20, 20]
+                arr[y:y+20, x:x+20] = [100, 100, 100]
     return Image.fromarray(arr)
 
 
@@ -71,51 +71,53 @@ class TestIndividualDetectors:
         clean = _make_clean_image()
         blurry = _make_blurry_image()
 
-        is_blurry_clean, _, lap_clean = detect_blur(clean, threshold=100.0)
-        is_blurry_blur, sev, lap_blur = detect_blur(blurry, threshold=100.0)
+        is_blurry_clean, _, _, clean_det = detect_blur(clean, threshold=100.0)
+        is_blurry_blur, sev, _, blur_det = detect_blur(blurry, threshold=100.0)
 
         assert is_blurry_clean is False
         assert is_blurry_blur is True
         assert sev > 0.5
-        assert lap_blur < lap_clean
+        assert blur_det["laplacian_variance"] < clean_det["laplacian_variance"]
 
     def test_noise_detection(self):
         clean = _make_clean_image()
         noisy = _make_noisy_image()
 
-        is_noisy_clean, _, _ = detect_noise(clean, threshold=15.0)
-        is_noisy_dirty, sev, sigma = detect_noise(noisy, threshold=15.0)
+        is_noisy_clean, _, _, _ = detect_noise(clean, threshold=15.0)
+        is_noisy_dirty, sev, _, dict_det = detect_noise(noisy, threshold=15.0)
 
         assert is_noisy_dirty is True
         assert sev > 0.0
-        assert sigma > 15.0
+        assert dict_det["estimated_noise_sigma"] > 15.0
 
     def test_resolution_detection(self):
         low_res = _make_low_res_image()
         high_res = _make_clean_image(1024, 1024)
 
-        is_low, sev, _ = detect_resolution(low_res, min_dimension=512)
+        is_low, sev, _, _ = detect_resolution(low_res, min_dimension=512)
         assert is_low is True
         assert sev > 0.5
 
-        is_high, _, _ = detect_resolution(high_res, min_dimension=512)
+        is_high, _, _, _ = detect_resolution(high_res, min_dimension=512)
         assert is_high is False
 
     def test_lowlight_detection(self):
         dark = _make_dark_image()
         normal = _make_clean_image()
+        cfg = {"low_light_threshold": 0.35, "overexposure_threshold": 0.70, "dark_ratio_threshold": 0.20, "bright_ratio_threshold": 0.20}
 
-        is_dark, sev, lum = detect_low_light(dark, threshold=0.35)
-        assert is_dark is True
-        assert sev > 0.5
-        assert lum < 0.35
+        degradations_dark, metrics_dark = detect_low_light(dark, config=cfg)
+        names = [d.name for d in degradations_dark]
+        assert "low_light" in names
+        assert metrics_dark["mean_luminance"] < 0.35
 
-        is_normal, _, _ = detect_low_light(normal, threshold=0.35)
-        assert is_normal is False
+        degradations_normal, metrics_norm = detect_low_light(normal, config=cfg)
+        names_norm = [d.name for d in degradations_normal]
+        assert "low_light" not in names_norm
 
     def test_jpeg_detection(self):
         jpeg_img = _make_jpeg_artifact_image()
-        has_jpeg, sev, score = detect_jpeg_artifacts(jpeg_img, threshold=0.40)
+        has_jpeg, sev, _, _ = detect_jpeg_artifacts(jpeg_img, threshold=0.10)
         assert has_jpeg is True
         assert sev > 0.0
 

@@ -14,31 +14,23 @@ upload:
 
 # --- Degradation Analyzer Thresholds ---
 # Scores are 0.0–1.0; severity mapped as:
-#   score < low_threshold  → LOW
-#   low_threshold <= score < high_threshold → MEDIUM
-#   score >= high_threshold → HIGH
+#   score < 0.35  → LOW
+#   0.35 <= score < 0.65 → MEDIUM
+#   score >= 0.65 → HIGH
 analyzer:
   blur:
-    # Laplacian variance: lower = blurrier
-    # These are inverted internally (low variance = high blur)
-    laplacian_low: 100.0     # Below this → HIGH blur
-    laplacian_high: 300.0    # Above this → LOW blur
+    laplacian_threshold: 250.0   # Below this, image is considered blurry
   noise:
-    # Estimated noise sigma
-    low_threshold: 5.0
-    high_threshold: 15.0
+    sigma_threshold: 15.0        # Above this, image is considered noisy
   resolution:
-    # Minimum acceptable dimension (width or height)
-    min_acceptable: 512
-    low_res_threshold: 256
-  low_light:
-    # Mean luminance (0–255 scale)
-    low_threshold: 50.0
-    high_threshold: 80.0
+    min_dimension: 512           # Below this, image is considered low resolution
+  exposure:
+    low_light_threshold: 0.35    # Mean luminance below this is low light (scale 0-1)
+    overexposure_threshold: 0.70 # Mean luminance above this is overexposed
+    dark_ratio_threshold: 0.20   # % of dark pixels
+    bright_ratio_threshold: 0.20 # % of bright pixels
   jpeg_artifacts:
-    # Blocking artifact strength
-    low_threshold: 0.3
-    high_threshold: 0.6
+    blocking_threshold: 0.40     # Blockness measure above this is considered jpeg artifacts
 
 # --- Pipeline Planner ---
 planner:
@@ -61,7 +53,7 @@ models:
   deblurring:
     name: "Restormer"
     weights_repo: "Ansh205/image-restoration-models"
-    weights_path: "restormer/restormer_deraining.pth"
+    weights_path: "restormer/restormer_deblurring.pth"
     use_lora: false
     lora_path: "restormer-lora/"
   super_resolution:

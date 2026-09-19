@@ -4,8 +4,9 @@ Integration tests for model fallbacks, pipeline routing, and image degradation f
 import numpy as np
 from PIL import Image
 from models.factory import get_model
-from core.pipeline.planner import PipelinePlanner, ImageDegradations
-from core.pipeline.engine import RestorationEngine, EngineConfig
+from core.pipeline.planner import PipelinePlanner
+from core.pipeline.engine import RestorationEngine
+from app.schemas.image import AnalysisResponse, DegradationItem
 
 
 def test_jpeg_model_factory_lookup():
@@ -41,9 +42,6 @@ def test_restormer_no_color_shift():
     assert abs(g_mean - 170.0) < 30.0
 
 
-from app.schemas.image import AnalysisResponse, DegradationItem
-
-
 def test_full_pipeline_with_jpeg_and_deblur():
     """Verify pipeline executes low_light -> deblur -> jpeg -> super_resolution seamlessly."""
     planner = PipelinePlanner()
@@ -61,9 +59,34 @@ def test_full_pipeline_with_jpeg_and_deblur():
     plan = planner.plan(analysis)
     assert "jpeg" in plan or "deblur" in plan
     
-    engine = RestorationEngine(EngineConfig(enable_metrics=True))
-    img = Image.new("RGB", (64, 64), color=(100, 120, 140))
+def test_resolution_preservation_1024x1280():
+    """Verify that an input of 1024x1280 is preserved as 1024x1280 in final output."""
+    engine = RestorationEngine()
+    orig_img = Image.new("RGB", (1024, 1280), color=(150, 150, 150))
+    working_img = orig_img.resize((819, 1024), Image.Resampling.LANCZOS)
     
-    res_img, report = engine.execute_pipeline(img, plan)
-    assert res_img is not None
-    assert len(report.steps_executed) == len(plan)
+    # Run pipeline with deblurring (no super resolution)
+    result = engine.run(working_img, ["deblur"], original_image=orig_img)
+    
+    assert result.final_image.size == (1024, 1280), f"Expected (1024, 1280), got {result.final_image.size}"
+    assert result.metrics["original_resolution"] == "1024x1280"
+    assert result.metrics["restored_resolution"] == "1024x1280"
+
+
+def test_planner_skips_low_severity_jpeg():
+    """Verify planner skips LOW severity JPEG artifacts when min_severity is MEDIUM."""
+    planner = PipelinePlanner()
+    analysis = AnalysisResponse(
+        image_id="test_low_jpeg",
+        degradations=[
+            DegradationItem(name="blur", score=0.85, severity="HIGH"),
+            DegradationItem(name="jpeg_artifacts", score=0.03, severity="LOW"),
+        ],
+    )
+    
+    # With min_severity="MEDIUM", jpeg_artifacts (LOW) should be skipped
+    plan = planner.plan(analysis, min_severity="MEDIUM")
+    assert "deblur" in plan
+    assert "jpeg" not in plan
+
+

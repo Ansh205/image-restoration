@@ -1,0 +1,3 @@
+filename,laplacian_variance,tenengrad_variance,blur_threshold,estimated_noise_sigma,noise_sigma_threshold,dimensions,min_dimension_found,min_dimension_threshold,mean_luminance,median_luminance,dark_ratio,bright_ratio,jpeg_blocking_score,jpeg_blocking_threshold,detected_blur,detected_noise,detected_low_resolution,detected_low_light,detected_overexposure,detected_jpeg_artifacts
+dark.png,0.0,0.0,250.0,0.0,15.0,"[256, 256]",256,512,0.196,0.196,0.0,0.0,0.0,0.4,HIGH,NONE,MEDIUM,MEDIUM,NONE,NONE
+random.jpg,1001.007,58863.387,250.0,66.274,15.0,"[512, 512]",512,512,0.498,0.498,0.012,0.011,0.0,0.4,NONE,HIGH,NONE,NONE,NONE,NONE

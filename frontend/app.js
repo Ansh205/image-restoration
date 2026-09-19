@@ -137,38 +137,37 @@ function renderAnalysisReport(uploadData, analyzeData) {
             const sevClass = deg.severity.toLowerCase();
             degradationsHtml += `
                 <div class="deg-card deg-${sevClass}">
-                    <span class="deg-name">${deg.name.replace('_', ' ').toUpperCase()}</span>
+                    <span class="deg-name">${deg.name.replace(/_/g, ' ').toUpperCase()}</span>
                     <span class="deg-badge badge-${sevClass}">${deg.severity} (${(deg.score * 100).toFixed(0)}%)</span>
+                    ${deg.confidence ? `<span style="display:block; font-size: 0.8rem; margin-top:2px; opacity: 0.8;">Confidence: ${(deg.confidence * 100).toFixed(0)}%</span>` : ''}
                 </div>
             `;
         });
         degradationsHtml += '</div>';
     }
 
-    const metricsHtml = `
-        <div class="metrics-grid">
-            <div class="metric-box">
-                <span class="metric-label">Laplacian Var (Blur)</span>
-                <span class="metric-val">${metrics.laplacian_variance ?? 'N/A'}</span>
-            </div>
-            <div class="metric-box">
-                <span class="metric-label">Noise Sigma (σ)</span>
-                <span class="metric-val">${metrics.estimated_noise_sigma ?? 'N/A'}</span>
-            </div>
-            <div class="metric-box">
-                <span class="metric-label">Mean Luminance</span>
-                <span class="metric-val">${metrics.mean_luminance ?? 'N/A'}</span>
-            </div>
-            <div class="metric-box">
-                <span class="metric-label">JPEG Block Score</span>
-                <span class="metric-val">${metrics.jpeg_blocking_score ?? 'N/A'}</span>
-            </div>
-            <div class="metric-box">
-                <span class="metric-label">Dimensions</span>
-                <span class="metric-val">${meta.width} x ${meta.height} px</span>
-            </div>
+    let metricsHtml = '<div class="metrics-grid">';
+    // Always show dimensions first
+    metricsHtml += `
+        <div class="metric-box">
+            <span class="metric-label">Dimensions</span>
+            <span class="metric-val">${meta.width} x ${meta.height} px</span>
         </div>
     `;
+
+    // Render all raw metrics dynamically directly from backend payload
+    for (const [key, val] of Object.entries(metrics)) {
+        if (key === "dimensions") continue;
+        const formattedKey = key.replace(/_/g, ' ').toUpperCase();
+        const formattedVal = (typeof val === 'number') ? val.toFixed(3) : val;
+        metricsHtml += `
+            <div class="metric-box">
+                <span class="metric-label">${formattedKey}</span>
+                <span class="metric-val">${formattedVal}</span>
+            </div>
+        `;
+    }
+    metricsHtml += '</div>';
 
     reportDiv.innerHTML = `
         <div class="analysis-container">

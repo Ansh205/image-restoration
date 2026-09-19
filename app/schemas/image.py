@@ -34,6 +34,7 @@ class DegradationItem(BaseModel):
     name: str = Field(..., description="Degradation type (e.g., 'noise', 'blur')")
     score: float = Field(..., ge=0.0, le=1.0, description="Raw severity score 0-1")
     severity: str = Field(..., description="Severity level: LOW, MEDIUM, or HIGH")
+    confidence: float | None = Field(default=None, description="Heuristic confidence score 0-1")
     details: dict = Field(default_factory=dict, description="Detector-specific info")
 
 

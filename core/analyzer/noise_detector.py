@@ -14,20 +14,19 @@ from loguru import logger
 def estimate_noise_sigma(gray: np.ndarray) -> float:
     """
     Estimate noise standard deviation (sigma) using median absolute deviation of Laplacian response.
-    Implements Immerkaer / Donoho noise estimation method.
+    Implements Immerkaer / Donoho noise estimation method with MAD for robustness against edges.
     """
-    h, w = gray.shape
     # Kernel for noise estimation
     kernel = np.array([[1, -2, 1],
                        [-2, 4, -2],
                        [1, -2, 1]], dtype=np.float32)
     
-    sigma = np.sum(np.abs(cv2.filter2D(gray.astype(np.float32), -1, kernel)))
-    sigma = sigma * np.sqrt(0.5 * np.pi) / (6.0 * (w - 2) * (h - 2))
+    lap = cv2.filter2D(gray.astype(np.float32), -1, kernel)
+    sigma = np.median(np.abs(lap)) * np.sqrt(0.5 * np.pi) / (6.0 * 0.6745)
     return float(sigma)
 
 
-def detect_noise(image: Image.Image, threshold: float = 15.0) -> Tuple[bool, float, float]:
+def detect_noise(image: Image.Image, threshold: float = 15.0) -> Tuple[bool, float, float | None, dict]:
     """
     Detect noise in PIL Image.
 
@@ -36,7 +35,7 @@ def detect_noise(image: Image.Image, threshold: float = 15.0) -> Tuple[bool, flo
         threshold: Noise sigma threshold (scale 0-255).
 
     Returns:
-        Tuple of (is_noisy: bool, severity: float [0.0-1.0], estimated_sigma: float)
+        Tuple of (is_noisy, severity, confidence, details_dict)
     """
     np_img = np.array(image)
     if np_img.ndim == 3:
@@ -53,5 +52,11 @@ def detect_noise(image: Image.Image, threshold: float = 15.0) -> Tuple[bool, flo
     else:
         severity = 0.0
 
+    details = {
+        "estimated_noise_sigma": round(sigma, 3),
+        "noise_sigma_threshold": threshold
+    }
+    confidence = 0.75
+
     logger.debug(f"Noise detector: estimated_sigma={sigma:.2f}, threshold={threshold}, is_noisy={is_noisy}")
-    return is_noisy, severity, sigma
+    return is_noisy, severity, confidence, details

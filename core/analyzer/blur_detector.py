@@ -11,16 +11,16 @@ from PIL import Image
 from loguru import logger
 
 
-def detect_blur(image: Image.Image, threshold: float = 250.0) -> Tuple[bool, float, float]:
+def detect_blur(image: Image.Image, threshold: float = 250.0) -> Tuple[bool, float, float | None, dict]:
     """
-    Detect blur using Laplacian variance on the grayscale image.
+    Detect blur using Laplacian variance and Tenengrad on the grayscale image.
 
     Args:
         image: PIL Image (RGB).
         threshold: Variance threshold below which an image is considered blurry.
 
     Returns:
-        Tuple of (is_blurry: bool, severity: float [0.0-1.0], laplacian_variance: float)
+        Tuple of (is_blurry: bool, severity: float [0.0-1.0], confidence, details_dict)
     """
     # Convert PIL Image to Grayscale OpenCV numpy array
     np_img = np.array(image)
@@ -34,6 +34,11 @@ def detect_blur(image: Image.Image, threshold: float = 250.0) -> Tuple[bool, flo
     
     # Compute Laplacian variance
     laplacian_var = float(cv2.Laplacian(smoothed, cv2.CV_64F).var())
+    
+    # Compute Tenengrad variance (gradient magnitude)
+    sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    tenengrad_var = float(np.mean(sobel_x**2 + sobel_y**2))
 
     is_blurry = laplacian_var < threshold
 
@@ -44,5 +49,14 @@ def detect_blur(image: Image.Image, threshold: float = 250.0) -> Tuple[bool, flo
     else:
         severity = 0.0
 
-    logger.debug(f"Blur detector: laplacian_var={laplacian_var:.2f}, threshold={threshold}, is_blurry={is_blurry}")
-    return is_blurry, severity, laplacian_var
+    details = {
+        "laplacian_variance": round(laplacian_var, 3),
+        "tenengrad_variance": round(tenengrad_var, 3),
+        "blur_threshold": threshold
+    }
+    # Calibrated heuristic confidence based on signal distance from threshold
+    conf_delta = abs(laplacian_var - threshold) / (threshold + 1e-5)
+    confidence = float(np.clip(0.55 + 0.35 * conf_delta, 0.50, 0.95))
+
+    logger.debug(f"Blur detector: laplacian_var={laplacian_var:.2f}, tenengrad={tenengrad_var:.2f}, threshold={threshold}, is_blurry={is_blurry}")
+    return is_blurry, severity, confidence, details
