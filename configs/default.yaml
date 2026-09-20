@@ -19,9 +19,9 @@ upload:
 #   score >= 0.65 → HIGH
 analyzer:
   blur:
-    laplacian_threshold: 250.0   # Below this, image is considered blurry
+    laplacian_threshold: 150.0   # Below this, image is considered blurry
   noise:
-    sigma_threshold: 15.0        # Above this, image is considered noisy
+    sigma_threshold: 8.0        # Above this, image is considered noisy
   resolution:
     min_dimension: 512           # Below this, image is considered low resolution
   exposure:

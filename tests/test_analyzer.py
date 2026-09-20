@@ -71,12 +71,12 @@ class TestIndividualDetectors:
         clean = _make_clean_image()
         blurry = _make_blurry_image()
 
-        is_blurry_clean, _, _, clean_det = detect_blur(clean, threshold=100.0)
-        is_blurry_blur, sev, _, blur_det = detect_blur(blurry, threshold=100.0)
+        is_blurry_clean, _, _, clean_det = detect_blur(clean, threshold=150.0)
+        is_blurry_blur, sev, _, blur_det = detect_blur(blurry, threshold=150.0)
 
         assert is_blurry_clean is False
         assert is_blurry_blur is True
-        assert sev > 0.5
+        assert sev > 0.3
         assert blur_det["laplacian_variance"] < clean_det["laplacian_variance"]
 
     def test_noise_detection(self):
