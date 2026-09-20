@@ -90,3 +90,20 @@ def test_planner_skips_low_severity_jpeg():
     assert "jpeg" not in plan
 
 
+def test_realesrgan_4k_capping():
+    """Verify RealESRGAN skips upscaling if image is already 4K (3840px) or caps output at 3840px."""
+    model = get_model("super_resolution")
+    
+    # 1. Already 4K image (3840x2160) -> should skip and retain 3840x2160
+    already_4k = Image.new("RGB", (3840, 2160), color=(100, 150, 200))
+    res_4k = model.restore(already_4k)
+    assert res_4k.size == (3840, 2160), f"Expected 3840x2160, got {res_4k.size}"
+
+    # 2. Large image (2000x2000) -> 4x upscale (8000x8000) should be capped at 3840x3840
+    large_img = Image.new("RGB", (2000, 2000), color=(100, 150, 200))
+    res_large = model.restore(large_img)
+    assert max(res_large.size) <= 3840, f"Expected max dimension <= 3840, got {res_large.size}"
+    assert res_large.size == (3840, 3840)
+
+
+

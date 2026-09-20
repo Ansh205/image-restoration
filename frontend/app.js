@@ -92,11 +92,15 @@ uploadBtn.addEventListener('click', async () => {
         renderAnalysisReport(uploadData, analyzeData);
 
         // 3. Execute Restoration Pipeline
+        const isUpscale4k = document.getElementById('upscale-4k-toggle')?.checked || false;
         uploadBtn.textContent = 'Running Pipeline Restoration...';
         const restoreResp = await fetch('/api/restore', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_id: imageId }),
+            body: JSON.stringify({
+                image_id: imageId,
+                upscale_4k: isUpscale4k,
+            }),
         });
 
         const restoreData = await restoreResp.json();

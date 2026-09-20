@@ -20,6 +20,12 @@
                 <p>Drag & drop an image here<br>or <strong>click to browse</strong></p>
                 <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
             </div>
+            <div class="toggle-container" style="margin: 1rem 0; display: flex; align-items: center; gap: 10px; justify-content: center;">
+                <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
+                    <input type="checkbox" id="upscale-4k-toggle" style="width: 18px; height: 18px; cursor: pointer;">
+                    ⚡ AI Upscale to 4K (Real-ESRGAN, max 3840px)
+                </label>
+            </div>
             <button id="upload-btn" class="btn" disabled>Restore Image</button>
         </section>
 

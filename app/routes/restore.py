@@ -35,6 +35,10 @@ class RestoreRequest(BaseModel):
         default=None,
         description="Optional explicit list of operations to run (overrides automatic planner)"
     )
+    upscale_4k: bool = Field(
+        default=False,
+        description="Enable 4K AI Upscaling (Real-ESRGAN capped at 3840px max dimension)"
+    )
 
 
 @router.post(
@@ -59,7 +63,7 @@ async def restore_image(req: RestoreRequest) -> RestorationResponse:
     pil_img = stored.get("for_inference") or stored["original"]
     orig_meta = stored["meta"]
 
-    logger.info(f"Processing restoration request for image_id='{req.image_id}' ({pil_img.width}x{pil_img.height})")
+    logger.info(f"Processing restoration request for image_id='{req.image_id}' ({pil_img.width}x{pil_img.height}), upscale_4k={req.upscale_4k}")
 
     # 1. Analyze degradations
     analysis_report = analyzer_instance.analyze(pil_img, image_id=req.image_id)
@@ -69,6 +73,11 @@ async def restore_image(req: RestoreRequest) -> RestorationResponse:
         analysis=analysis_report,
         custom_operations=req.custom_operations,
     )
+
+    # 3. If upscale_4k is enabled, ensure super_resolution is in the planned operations
+    if req.upscale_4k and "super_resolution" not in planned_operations:
+        logger.info("4K AI Upscaling toggle ON: appending 'super_resolution' to operations pipeline.")
+        planned_operations.append("super_resolution")
 
     # 3. Execute restoration engine
     original_img = stored["original"]

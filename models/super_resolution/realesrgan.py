@@ -128,18 +128,45 @@ class RealESRGANModel(BaseRestorationModel):
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
 
+        max_dim = max(image.width, image.height)
+        MAX_4K = 3840
+
+        if max_dim >= MAX_4K:
+            logger.info(f"Image is already at or above 4K resolution (max dim: {max_dim}px >= {MAX_4K}px). Skipping super_resolution upscaling.")
+            return image
+
+        # Pre-scale input to 960px max dimension if needed so 4x upscale outputs max 3840px (prevents CPU RAM spikes)
+        working_img = image
+        if max_dim > 960:
+            scale_factor = 960.0 / float(max_dim)
+            new_w = max(1, int(round(image.width * scale_factor)))
+            new_h = max(1, int(round(image.height * scale_factor)))
+            logger.info(f"Pre-scaling RealESRGAN input from {image.width}x{image.height} to {new_w}x{new_h} to cap 4K output at {MAX_4K}px.")
+            working_img = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
         if not self.has_weights:
             logger.info("RealESRGAN using high-quality Lanczos 4x upscaling fallback")
-            target_w = image.width * 4
-            target_h = image.height * 4
-            return image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            target_w = working_img.width * 4
+            target_h = working_img.height * 4
+            upscaled = working_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        else:
+            np_img = pil_to_numpy(working_img)
+            tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
 
-        np_img = pil_to_numpy(image)
-        tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                output_tensor = self.model(tensor_img)
+                output_tensor = torch.clamp(output_tensor, 0.0, 1.0)
 
-        with torch.no_grad():
-            output_tensor = self.model(tensor_img)
-            output_tensor = torch.clamp(output_tensor, 0.0, 1.0)
+            output_np = output_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
+            upscaled = numpy_to_pil(output_np)
 
-        output_np = output_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
-        return numpy_to_pil(output_np)
+        # Ensure output does not exceed 3840px max dimension
+        up_max_dim = max(upscaled.width, upscaled.height)
+        if up_max_dim > MAX_4K:
+            scale_factor = MAX_4K / float(up_max_dim)
+            new_w = max(1, int(round(upscaled.width * scale_factor)))
+            new_h = max(1, int(round(upscaled.height * scale_factor)))
+            logger.info(f"Upscaled image capped to 4K max dimension ({MAX_4K}px). Final size: {new_w}x{new_h}")
+            upscaled = upscaled.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        return upscaled
