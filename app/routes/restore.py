@@ -65,28 +65,19 @@ async def restore_image(req: RestoreRequest) -> RestorationResponse:
 
     logger.info(f"Processing restoration request for image_id='{req.image_id}' ({pil_img.width}x{pil_img.height}), upscale_4k={req.upscale_4k}")
 
-    # 1. Analyze degradations
-    analysis_report = analyzer_instance.analyze(pil_img, image_id=req.image_id)
-
-    # 2. Plan pipeline sequence
-    planned_operations = planner_instance.plan(
-        analysis=analysis_report,
-        custom_operations=req.custom_operations,
-    )
-
-    # 3. If upscale_4k is enabled, ensure super_resolution is in the planned operations
-    if req.upscale_4k and "super_resolution" not in planned_operations:
-        logger.info("4K AI Upscaling toggle ON: appending 'super_resolution' to operations pipeline.")
-        planned_operations.append("super_resolution")
-
-    # 3. Execute restoration engine
+    # Execute two-pass restoration engine
     original_img = stored["original"]
-    engine_result = engine_instance.run(
+    engine_result = engine_instance.run_two_pass(
         image=pil_img,
-        operations=planned_operations,
+        analyzer=analyzer_instance,
+        planner=planner_instance,
+        custom_operations=req.custom_operations,
+        upscale_4k=req.upscale_4k,
         original_image=original_img,
+        image_id=req.image_id,
     )
     restored_img = engine_result.final_image
+    analysis_report = engine_result.analysis_report
 
     # 4. Generate restored image metadata & store in memory
     restored_bytes = image_to_bytes(restored_img, fmt=orig_meta.format or "PNG")

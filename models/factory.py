@@ -10,6 +10,7 @@ from loguru import logger
 
 from models.base import BaseRestorationModel
 from models.denoising.drunet import DRUNetModel
+from models.denoising.scunet import SCUNetModel
 from models.deblurring.restormer import RestormerModel
 from models.super_resolution.realesrgan import RealESRGANModel
 from models.low_light.zerodce import ZeroDCEModel
@@ -18,7 +19,7 @@ from models.jpeg.swinir import SwinIRModel
 
 # Registry mapping operation key -> Model Class
 MODEL_REGISTRY: dict[str, Type[BaseRestorationModel]] = {
-    "denoise": DRUNetModel,
+    "denoise": SCUNetModel,
     "deblur": RestormerModel,
     "super_resolution": RealESRGANModel,
     "low_light": ZeroDCEModel,
@@ -28,6 +29,8 @@ MODEL_REGISTRY: dict[str, Type[BaseRestorationModel]] = {
 
 # Registry mapping model name -> Model Class
 NAME_REGISTRY: dict[str, Type[BaseRestorationModel]] = {
+    "scunet": SCUNetModel,
+    "scunetmodel": SCUNetModel,
     "drunet": DRUNetModel,
     "restormer": RestormerModel,
     "real-esrgan": RealESRGANModel,

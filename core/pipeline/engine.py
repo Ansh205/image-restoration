@@ -11,6 +11,7 @@ from loguru import logger
 
 from models.factory import get_model
 from core.pipeline.image_utils import image_to_bytes
+from core.evaluator.restoration_evaluator import RestorationEvaluator, EvaluationResult
 
 
 @dataclass
@@ -31,6 +32,7 @@ class EngineResult:
     pipeline_steps: List[Dict[str, Any]]
     total_time_seconds: float
     metrics: Dict[str, Any] = field(default_factory=dict)
+    analysis_report: Optional[Any] = None
 
 
 def _compute_basic_metrics(original: Image.Image, restored: Image.Image) -> Dict[str, Any]:
@@ -87,10 +89,13 @@ def _compute_basic_metrics(original: Image.Image, restored: Image.Image) -> Dict
 class RestorationEngine:
     """
     Sequentially processes an image through an ordered list of restoration operations.
+    Supports single-pass execution and two-pass post-restoration degradation re-evaluation
+    with per-operation before/after quality evaluation.
     """
 
-    def __init__(self, device: str = "cpu"):
+    def __init__(self, device: str = "cpu", evaluator: Optional[RestorationEvaluator] = None):
         self.device = device
+        self.evaluator = evaluator or RestorationEvaluator()
 
     def run(
         self,
@@ -129,15 +134,12 @@ class RestorationEngine:
         for idx, op in enumerate(operations, start=1):
             t0 = time.time()
             input_size = (working_img.width, working_img.height)
-
-            # Step input stats
-            inp_gray = cv2.cvtColor(np.array(working_img.convert("RGB")), cv2.COLOR_RGB2GRAY)
-            inp_lap = float(cv2.Laplacian(inp_gray, cv2.CV_64F).var())
+            image_before = working_img.copy()
 
             try:
                 model = get_model(op)
                 logger.info(f"Step {idx}/{len(operations)}: Running '{op}' using {model.name} on size {input_size[0]}x{input_size[1]}")
-                restored_step = model.predict(working_img)
+                restored_step = model.predict(image_before)
             except Exception as e:
                 logger.error(f"Error executing step '{op}': {e}. Skipping step.")
                 continue
@@ -145,16 +147,22 @@ class RestorationEngine:
             dt = round(time.time() - t0, 3)
             output_size = (restored_step.width, restored_step.height)
 
-            # Step output stats
-            out_gray = cv2.cvtColor(np.array(restored_step.convert("RGB")), cv2.COLOR_RGB2GRAY)
-            out_lap = float(cv2.Laplacian(out_gray, cv2.CV_64F).var())
-            step_lap_change = ((out_lap - inp_lap) / max(inp_lap, 1e-5)) * 100.0
+            # Evaluate before/after
+            eval_res = self.evaluator.evaluate(op, image_before, restored_step)
 
-            # Pixel diff stats between step input and output (resizing for comparison if step changed dimensions)
-            if working_img.size != restored_step.size:
-                step_inp_eval = np.array(working_img.resize(restored_step.size, Image.Resampling.LANCZOS).convert("RGB"), dtype=np.float32)
+            logger.info(f"[{op.upper()}] Before:")
+            logger.info(f"    Laplacian={eval_res.before_metrics.get('laplacian', 0.0):.2f}")
+            logger.info(f"    NoiseSigma={eval_res.before_metrics.get('noise_sigma', 0.0):.2f}")
+            logger.info(f"[{op.upper()}] After:")
+            logger.info(f"    Laplacian={eval_res.after_metrics.get('laplacian', 0.0):.2f}")
+            logger.info(f"    NoiseSigma={eval_res.after_metrics.get('noise_sigma', 0.0):.2f}")
+            logger.info(f"[{op.upper()}] Decision: {eval_res.decision}")
+            logger.info(f"[{op.upper()}] Reason: {eval_res.reason}")
+
+            if image_before.size != restored_step.size:
+                step_inp_eval = np.array(image_before.resize(restored_step.size, Image.Resampling.LANCZOS).convert("RGB"), dtype=np.float32)
             else:
-                step_inp_eval = np.array(working_img.convert("RGB"), dtype=np.float32)
+                step_inp_eval = np.array(image_before.convert("RGB"), dtype=np.float32)
             step_out_eval = np.array(restored_step.convert("RGB"), dtype=np.float32)
             step_diff = np.abs(step_out_eval - step_inp_eval)
             step_mad = float(np.mean(step_diff))
@@ -162,27 +170,32 @@ class RestorationEngine:
 
             step_info = {
                 "step_number": idx,
+                "pass_number": 1,
                 "operation": op,
                 "model_name": model.name,
+                "decision": eval_res.decision,
+                "reason": eval_res.reason,
                 "execution_time_seconds": dt,
                 "input_size": f"{input_size[0]}x{input_size[1]}",
                 "output_size": f"{output_size[0]}x{output_size[1]}",
-                "laplacian_before": round(inp_lap, 2),
-                "laplacian_after": round(out_lap, 2),
-                "laplacian_change_percent": round(step_lap_change, 2),
+                "laplacian_before": eval_res.before_metrics.get("laplacian"),
+                "laplacian_after": eval_res.after_metrics.get("laplacian"),
+                "laplacian_change_percent": eval_res.improvement_metrics.get("laplacian_pct", 0.0),
+                "noise_sigma_before": eval_res.before_metrics.get("noise_sigma"),
+                "noise_sigma_after": eval_res.after_metrics.get("noise_sigma"),
                 "mean_absolute_difference": round(step_mad, 3),
                 "changed_pixels_percent": round(step_changed_pct, 2),
+                "before_metrics": eval_res.before_metrics,
+                "after_metrics": eval_res.after_metrics,
+                "improvement_metrics": eval_res.improvement_metrics,
             }
             step_records.append(step_info)
-            logger.info(
-                f"[{op.upper()}] Done in {dt}s | Input: {input_size[0]}x{input_size[1]} -> Output: {output_size[0]}x{output_size[1]} | "
-                f"Laplacian: {inp_lap:.2f} -> {out_lap:.2f} ({step_lap_change:+.2f}%) | MAD: {step_mad:.3f} | Changed: {step_changed_pct:.2f}%"
-            )
 
-            working_img = restored_step
+            if eval_res.decision == "KEEP":
+                working_img = restored_step
+            else:
+                logger.warning(f"[{op.upper()}] Output DISCARDED. Retaining image_before for subsequent operations.")
 
-        # Final Resolution Restoration:
-        # If super_resolution was NOT executed and working_img size differs from original_ref, reconstruct back to original resolution!
         if "super_resolution" not in operations:
             orig_w, orig_h = original_ref.width, original_ref.height
             if (working_img.width, working_img.height) != (orig_w, orig_h):
@@ -200,3 +213,258 @@ class RestorationEngine:
             total_time_seconds=total_dt,
             metrics=metrics,
         )
+
+    def run_two_pass(
+        self,
+        image: Image.Image,
+        analyzer: Any,
+        planner: Any,
+        custom_operations: Optional[List[str]] = None,
+        upscale_4k: bool = False,
+        original_image: Optional[Image.Image] = None,
+        image_id: str = "",
+    ) -> EngineResult:
+        """
+        Executes a TWO-PASS restoration architecture:
+        - PASS 1: Analyzes image, plans pipeline, and executes planned operations with quality evaluation.
+        - PASS 2: Re-analyzes Pass-1 output image. Filters out already applied operations.
+                  Executes any remaining/newly exposed operations with quality evaluation. Max 2 passes.
+        """
+        original_ref = original_image or image
+        start_total_time = time.time()
+        working_img = image.copy()
+
+        applied_operations = set()
+        all_step_records = []
+        global_step_counter = 1
+
+        logger.info("Starting restoration request...")
+
+        # ===================================================================
+        # PASS 1 / 2
+        # ===================================================================
+        logger.info("PASS 1/2")
+
+        pass1_analysis = analyzer.analyze(working_img, image_id=image_id)
+        initial_degradations = [
+            deg.name for deg in pass1_analysis.degradations
+            if getattr(deg, "detected", True)
+        ]
+        logger.info(f"Initial degradations:\n{initial_degradations}")
+
+        pass1_planned = planner.plan(
+            analysis=pass1_analysis,
+            custom_operations=custom_operations,
+        )
+
+        if upscale_4k and "super_resolution" not in pass1_planned:
+            logger.info("4K AI Upscaling toggle ON: appending 'super_resolution' to operations pipeline.")
+            pass1_planned.append("super_resolution")
+
+        logger.info(f"Planned PASS 1 pipeline:\n{pass1_planned}")
+
+        pass1_executed = []
+        for op in pass1_planned:
+            logger.info(f"Running PASS 1 operation: {op}")
+            t0 = time.time()
+            input_size = (working_img.width, working_img.height)
+            image_before = working_img.copy()
+
+            try:
+                model = get_model(op)
+                logger.info(f"Step {global_step_counter} (Pass 1): Running '{op}' using {model.name} on size {input_size[0]}x{input_size[1]}")
+                restored_step = model.predict(image_before)
+            except Exception as e:
+                logger.error(f"Error executing step '{op}': {e}. Skipping step.")
+                continue
+
+            dt = round(time.time() - t0, 3)
+            output_size = (restored_step.width, restored_step.height)
+
+            # Evaluate before/after
+            eval_res = self.evaluator.evaluate(op, image_before, restored_step)
+
+            logger.info(f"[{op.upper()}] Before:")
+            logger.info(f"    Laplacian={eval_res.before_metrics.get('laplacian', 0.0):.2f}")
+            logger.info(f"    NoiseSigma={eval_res.before_metrics.get('noise_sigma', 0.0):.2f}")
+            logger.info(f"[{op.upper()}] After:")
+            logger.info(f"    Laplacian={eval_res.after_metrics.get('laplacian', 0.0):.2f}")
+            logger.info(f"    NoiseSigma={eval_res.after_metrics.get('noise_sigma', 0.0):.2f}")
+            logger.info(f"[{op.upper()}] Decision: {eval_res.decision}")
+            logger.info(f"[{op.upper()}] Reason: {eval_res.reason}")
+
+            if image_before.size != restored_step.size:
+                step_inp_eval = np.array(image_before.resize(restored_step.size, Image.Resampling.LANCZOS).convert("RGB"), dtype=np.float32)
+            else:
+                step_inp_eval = np.array(image_before.convert("RGB"), dtype=np.float32)
+            step_out_eval = np.array(restored_step.convert("RGB"), dtype=np.float32)
+            step_diff = np.abs(step_out_eval - step_inp_eval)
+            step_mad = float(np.mean(step_diff))
+            step_changed_pct = float(np.mean(step_diff > 1.0) * 100.0)
+
+            step_info = {
+                "step_number": global_step_counter,
+                "pass_number": 1,
+                "operation": op,
+                "model_name": model.name,
+                "decision": eval_res.decision,
+                "reason": eval_res.reason,
+                "execution_time_seconds": dt,
+                "input_size": f"{input_size[0]}x{input_size[1]}",
+                "output_size": f"{output_size[0]}x{output_size[1]}",
+                "laplacian_before": eval_res.before_metrics.get("laplacian"),
+                "laplacian_after": eval_res.after_metrics.get("laplacian"),
+                "laplacian_change_percent": eval_res.improvement_metrics.get("laplacian_pct", 0.0),
+                "noise_sigma_before": eval_res.before_metrics.get("noise_sigma"),
+                "noise_sigma_after": eval_res.after_metrics.get("noise_sigma"),
+                "mean_absolute_difference": round(step_mad, 3),
+                "changed_pixels_percent": round(step_changed_pct, 2),
+                "before_metrics": eval_res.before_metrics,
+                "after_metrics": eval_res.after_metrics,
+                "improvement_metrics": eval_res.improvement_metrics,
+            }
+            all_step_records.append(step_info)
+            global_step_counter += 1
+
+            if eval_res.decision == "KEEP":
+                applied_operations.add(op)
+                pass1_executed.append(op)
+                working_img = restored_step
+            else:
+                logger.warning(f"[{op.upper()}] Output DISCARDED. Retaining image_before for subsequent steps.")
+
+        logger.info("PASS 1 completed.")
+
+        # ===================================================================
+        # PASS 2 / 2
+        # ===================================================================
+        logger.info("Running post-restoration degradation analysis...")
+        logger.info("PASS 2/2")
+
+        pass2_analysis = analyzer.analyze(working_img, image_id=f"{image_id}_pass2")
+        remaining_degradations = [
+            deg.name for deg in pass2_analysis.degradations
+            if getattr(deg, "detected", True)
+        ]
+        logger.info(f"Remaining/new degradations:\n{remaining_degradations}")
+
+        candidate_pass2_pipeline = planner.plan(analysis=pass2_analysis)
+        logger.info(f"Candidate PASS 2 pipeline:\n{candidate_pass2_pipeline}")
+
+        pass2_planned = []
+        pass2_skipped = []
+        for op in candidate_pass2_pipeline:
+            if op in applied_operations:
+                logger.info(f"Skipping '{op}': already applied in PASS 1")
+                pass2_skipped.append(op)
+            else:
+                pass2_planned.append(op)
+
+        pass2_executed = []
+        if not pass2_planned:
+            logger.info("No new restoration operations required.\nRestoration completed.")
+        else:
+            logger.info(f"Planned PASS 2 pipeline:\n{pass2_planned}")
+            for op in pass2_planned:
+                logger.info(f"Running PASS 2 operation: {op}")
+                t0 = time.time()
+                input_size = (working_img.width, working_img.height)
+                image_before = working_img.copy()
+
+                try:
+                    model = get_model(op)
+                    logger.info(f"Step {global_step_counter} (Pass 2): Running '{op}' using {model.name} on size {input_size[0]}x{input_size[1]}")
+                    restored_step = model.predict(image_before)
+                except Exception as e:
+                    logger.error(f"Error executing step '{op}': {e}. Skipping step.")
+                    continue
+
+                dt = round(time.time() - t0, 3)
+                output_size = (restored_step.width, restored_step.height)
+
+                # Evaluate before/after
+                eval_res = self.evaluator.evaluate(op, image_before, restored_step)
+
+                logger.info(f"[{op.upper()}] Before:")
+                logger.info(f"    Laplacian={eval_res.before_metrics.get('laplacian', 0.0):.2f}")
+                logger.info(f"    NoiseSigma={eval_res.before_metrics.get('noise_sigma', 0.0):.2f}")
+                logger.info(f"[{op.upper()}] After:")
+                logger.info(f"    Laplacian={eval_res.after_metrics.get('laplacian', 0.0):.2f}")
+                logger.info(f"    NoiseSigma={eval_res.after_metrics.get('noise_sigma', 0.0):.2f}")
+                logger.info(f"[{op.upper()}] Decision: {eval_res.decision}")
+                logger.info(f"[{op.upper()}] Reason: {eval_res.reason}")
+
+                if image_before.size != restored_step.size:
+                    step_inp_eval = np.array(image_before.resize(restored_step.size, Image.Resampling.LANCZOS).convert("RGB"), dtype=np.float32)
+                else:
+                    step_inp_eval = np.array(image_before.convert("RGB"), dtype=np.float32)
+                step_out_eval = np.array(restored_step.convert("RGB"), dtype=np.float32)
+                step_diff = np.abs(step_out_eval - step_inp_eval)
+                step_mad = float(np.mean(step_diff))
+                step_changed_pct = float(np.mean(step_diff > 1.0) * 100.0)
+
+                step_info = {
+                    "step_number": global_step_counter,
+                    "pass_number": 2,
+                    "operation": op,
+                    "model_name": model.name,
+                    "decision": eval_res.decision,
+                    "reason": eval_res.reason,
+                    "execution_time_seconds": dt,
+                    "input_size": f"{input_size[0]}x{input_size[1]}",
+                    "output_size": f"{output_size[0]}x{output_size[1]}",
+                    "laplacian_before": eval_res.before_metrics.get("laplacian"),
+                    "laplacian_after": eval_res.after_metrics.get("laplacian"),
+                    "laplacian_change_percent": eval_res.improvement_metrics.get("laplacian_pct", 0.0),
+                    "noise_sigma_before": eval_res.before_metrics.get("noise_sigma"),
+                    "noise_sigma_after": eval_res.after_metrics.get("noise_sigma"),
+                    "mean_absolute_difference": round(step_mad, 3),
+                    "changed_pixels_percent": round(step_changed_pct, 2),
+                    "before_metrics": eval_res.before_metrics,
+                    "after_metrics": eval_res.after_metrics,
+                    "improvement_metrics": eval_res.improvement_metrics,
+                }
+                all_step_records.append(step_info)
+                global_step_counter += 1
+
+                if eval_res.decision == "KEEP":
+                    applied_operations.add(op)
+                    pass2_executed.append(op)
+                    working_img = restored_step
+                else:
+                    logger.warning(f"[{op.upper()}] Output DISCARDED. Retaining image_before for subsequent steps.")
+
+            logger.info("PASS 2 completed.\nRestoration completed.")
+
+        # Final Resolution Reconstruction (if super_resolution was NOT executed across either pass)
+        if "super_resolution" not in applied_operations:
+            orig_w, orig_h = original_ref.width, original_ref.height
+            if (working_img.width, working_img.height) != (orig_w, orig_h):
+                logger.info(f"Reconstructing final output size from model resolution ({working_img.width}x{working_img.height}) back to original resolution ({orig_w}x{orig_h})")
+                working_img = working_img.resize((orig_w, orig_h), Image.Resampling.LANCZOS)
+
+        total_dt = round(time.time() - start_total_time, 3)
+        metrics = _compute_basic_metrics(original_ref, working_img)
+
+        metrics.update({
+            "pass_1_degradations": initial_degradations,
+            "pass_1_planned": pass1_planned,
+            "pass_1_executed": pass1_executed,
+            "pass_2_degradations": remaining_degradations,
+            "pass_2_candidate": candidate_pass2_pipeline,
+            "pass_2_planned": pass2_planned,
+            "pass_2_skipped": pass2_skipped,
+            "pass_2_executed": pass2_executed,
+            "applied_operations": list(applied_operations),
+            "passes_executed": 2 if pass2_planned else 1,
+        })
+
+        return EngineResult(
+            final_image=working_img,
+            pipeline_steps=all_step_records,
+            total_time_seconds=total_dt,
+            metrics=metrics,
+            analysis_report=pass1_analysis,
+        )
+
+

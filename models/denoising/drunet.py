@@ -80,75 +80,13 @@ class DRUNetArch(nn.Module):
         return out
 
 
-# ---------------------------------------------------------------------------
-# DRUNet Wrapper Class
-# ---------------------------------------------------------------------------
-class DRUNetModel(BaseRestorationModel):
+from models.denoising.scunet import SCUNetModel
+
+# Expose DRUNetModel as alias of SCUNetModel for backward compatibility
+class DRUNetModel(SCUNetModel):
     """
-    DRUNet denoising wrapper.
-    Converts PIL Image → Tensor + Noise Map → DRUNet → Denoised PIL Image.
+    DRUNetModel wrapper alias.
+    Delegates to SCUNetModel for blind real-world denoising with Real-PSNR checkpoint.
     """
+    pass
 
-    def __init__(self, config: dict[str, Any] | None = None, device: str | None = None):
-        super().__init__(config, device)
-        self.noise_level: float = self.config.get("noise_level", 15.0)
-
-    def load(self) -> None:
-        self.model = DRUNetArch(in_nc=4, out_nc=3).to(self.device)
-        self.model.eval()
-
-        repo_id = self.config.get("weights_repo", "Ansh205/image-restoration-models")
-        weights_path = self.config.get("weights_path", "drunet/drunet_color.pth")
-
-        local_weights = get_weights_path(repo_id, weights_path)
-        if local_weights.exists():
-            try:
-                state_dict = torch.load(str(local_weights), map_location=self.device)
-                self.model.load_state_dict(state_dict, strict=False)
-                self.has_weights = True
-                logger.info(f"Loaded DRUNet weights from {local_weights}")
-            except Exception as e:
-                logger.warning(f"Failed to load DRUNet checkpoint state dict: {e}")
-                self.has_weights = False
-        else:
-            self.has_weights = False
-
-        self._loaded = True
-
-    def restore(self, image: Image.Image) -> Image.Image:
-        self.ensure_loaded()
-
-        if not self.has_weights:
-            logger.info("DRUNet using identity passthrough fallback")
-            return image
-
-        np_img = pil_to_numpy(image)  # (H, W, 3) float32 [0, 1]
-        h, w, _ = np_img.shape
-
-        # Pad dimensions to multiples of 4 for UNet downsampling
-        pad_h = (4 - h % 4) % 4
-        pad_w = (4 - w % 4) % 4
-        if pad_h > 0 or pad_w > 0:
-            np_img = np.pad(np_img, ((0, pad_h), (0, pad_w), (0, 0)), mode="reflect")
-
-        tensor_img = torch.from_numpy(np_img).permute(2, 0, 1).unsqueeze(0).to(self.device)
-
-        # Create noise level map (normalized)
-        sigma = self.noise_level / 255.0
-        noise_map = torch.full((1, 1, tensor_img.shape[2], tensor_img.shape[3]), sigma, device=self.device)
-
-        # Concatenate image + noise map -> (1, 4, H, W)
-        input_tensor = torch.cat([tensor_img, noise_map], dim=1)
-
-        with torch.no_grad():
-            output_tensor = self.model(input_tensor)
-            # Residual learning: output = input - residual noise (or direct output)
-            output_tensor = torch.clamp(output_tensor, 0.0, 1.0)
-
-        output_np = output_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
-
-        # Unpad
-        if pad_h > 0 or pad_w > 0:
-            output_np = output_np[:h, :w, :]
-
-        return numpy_to_pil(output_np)

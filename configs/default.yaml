@@ -70,6 +70,24 @@ models:
     weights_repo: "Ansh205/image-restoration-models"
     weights_path: "swinir/swinir_jpeg.pth"
 
+# --- Evaluator ---
+evaluator:
+  min_improvement_pct: 0.03       # 3% minimum meaningful improvement for primary targets
+  denoise:
+    min_noise_reduction_pct: 0.03 # Noise estimate must decrease by at least 3%
+    max_sharpness_loss_pct: 0.15  # Laplacian sharpness must not drop by more than 15%
+  deblur:
+    min_sharpness_gain_pct: 0.03  # Laplacian sharpness must increase by at least 3%
+    max_noise_increase_pct: 0.35  # Noise sigma must not increase by more than 35%
+  low_light:
+    min_luminance_gain_pct: 0.03  # Mean luminance must improve by at least 3% or dark ratio reduce
+    max_bright_clip_ratio: 0.25   # Bright clip ratio must not exceed 25%
+  jpeg_artifacts:
+    min_blocking_reduction_pct: 0.03 # JPEG blocking score must decrease by at least 3%
+    max_sharpness_loss_pct: 0.15     # Sharpness must not drop by more than 15%
+  super_resolution:
+    expected_scale_factor: 4      # Dimensions must scale appropriately
+
 # --- Inference ---
 inference:
   # Max input size for deployment (resize if larger)
@@ -79,3 +97,4 @@ inference:
 logging:
   level: "INFO"
   log_file: "logs/app.log"
+
