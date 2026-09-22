@@ -185,6 +185,7 @@ class PipelinePlanner:
     def __init__(
         self,
         canonical_order: Optional[List[str]] = None,
+        min_activation_thresholds: Optional[dict] = None,
     ):
         """
         Initialize the pipeline planner.
@@ -194,12 +195,33 @@ class PipelinePlanner:
                 Optional custom restoration order.
                 If not provided, the default canonical order
                 is used.
+            min_activation_thresholds:
+                Optional dict mapping degradation name to minimum activation score.
         """
 
         self.canonical_order = (
             canonical_order
             or CANONICAL_RESTORATION_ORDER
         )
+
+        default_thresholds = {
+            "noise": 0.15,
+            "blur": 0.15,
+            "low_light": 0.15,
+            "jpeg_artifacts": 0.35,
+            "low_resolution": 0.15,
+        }
+        if min_activation_thresholds is None:
+            try:
+                from app.config import load_config
+                cfg = load_config()
+                min_activation_thresholds = cfg.get("planner", {}).get(
+                    "min_activation_thresholds", default_thresholds
+                )
+            except Exception:
+                min_activation_thresholds = default_thresholds
+
+        self.min_activation_thresholds = min_activation_thresholds
 
     def plan(
         self,
@@ -324,6 +346,18 @@ class PipelinePlanner:
                     f"severity={severity}."
                 )
 
+                continue
+
+            # -------------------------------------------------
+            # Minimum Activation Threshold filtering
+            # -------------------------------------------------
+
+            thresh = self.min_activation_thresholds.get(name, 0.15)
+            if score < thresh:
+                logger.info(
+                    f"Skipping '{operation}': "
+                    f"{name} score {score:.2f} is below activation threshold {thresh:.2f}."
+                )
                 continue
 
             # -------------------------------------------------

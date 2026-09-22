@@ -1,7 +1,7 @@
-"""
-Comprehensive Verification Script for Per-Operation Before/After Restoration Evaluator.
-Tests all 5 required evaluation scenarios and two-pass engine integration.
-"""
+import os
+import sys
+sys.path.insert(0, os.path.abspath("."))
+
 import numpy as np
 from PIL import Image
 from loguru import logger
@@ -75,9 +75,13 @@ def test_engine_evaluator_discard_behavior():
     logger.info("INTEGRATION TEST 5: Engine Discard Propagation Check")
     logger.info("============================================================")
 
-    class DummyBadModel:
+    from models.base import BaseRestorationModel
+
+    class DummyBadModel(BaseRestorationModel):
         name = "DummyBadModel"
-        def predict(self, img: Image.Image) -> Image.Image:
+        def load(self):
+            self._loaded = True
+        def restore(self, img: Image.Image) -> Image.Image:
             # Return identical image so evaluator discards it
             return img.copy()
 
@@ -87,13 +91,20 @@ def test_engine_evaluator_discard_behavior():
 
     test_img = Image.new("RGB", (100, 100), color=(100, 100, 100))
 
-    # Single pass run
-    res = engine.run(test_img, ["deblur"])
-    step = res.pipeline_steps[0]
-    logger.info(f"Step decision: {step['decision']} | Reason: {step['reason']}")
-    assert step["decision"] == "DISCARD"
-    assert res.final_image is not None
-    logger.info("[OK] Discarded output is not propagated to final image.")
+    from models.factory import MODEL_REGISTRY
+    orig_deblur_model = MODEL_REGISTRY.get("deblur")
+    MODEL_REGISTRY["deblur"] = DummyBadModel
+    try:
+        # Single pass run
+        res = engine.run(test_img, ["deblur"])
+        step = res.pipeline_steps[0]
+        logger.info(f"Step decision: {step['decision']} | Reason: {step['reason']}")
+        assert step["decision"] == "DISCARD"
+        assert res.final_image is not None
+        logger.info("[OK] Discarded output is not propagated to final image.")
+    finally:
+        if orig_deblur_model:
+            MODEL_REGISTRY["deblur"] = orig_deblur_model
 
 
 def test_two_pass_with_evaluator():
@@ -119,9 +130,11 @@ def test_two_pass_with_evaluator():
     logger.info("TWO-PASS EVALUATION SUMMARY")
     logger.info("============================================================")
     for step in res.pipeline_steps:
+        dec_val = step.get('evaluator_decision', step.get('effect', step.get('decision', 'N/A')))
+        reason_val = step.get('evaluator_reason', step.get('reason', 'N/A'))
         logger.info(
             f"Step {step['step_number']} (Pass {step['pass_number']}): op='{step['operation']}' | "
-            f"decision={step['decision']} | reason='{step['reason']}'"
+            f"decision={dec_val} | reason='{reason_val}'"
         )
 
     assert res.final_image is not None

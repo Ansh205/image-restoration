@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+    test_two_pass_attempted_operations_tracking()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\agraw\Downloads\image-restoration\scripts\test_umsn_face_deblur.py", line 91, in test_two_pass_attempted_operations_tracking
+    res = engine.run_two_pass(
+        image=test_img,
+    ...<2 lines>...
+        image_id="test_attempted_ops",
+    )
+  File "C:\Users\agraw\Downloads\image-restoration\core\pipeline\engine.py", line 247, in run_two_pass
+    pass1_analysis = analyzer.analyze(working_img, image_id=image_id)
+                                      ^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'working_img' where it is not associated with a value

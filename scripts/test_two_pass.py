@@ -1,7 +1,10 @@
 """
 Standalone verification script for Two-Pass Restoration Architecture.
 """
+import os
 import sys
+sys.path.insert(0, os.path.abspath("."))
+
 import numpy as np
 from PIL import Image
 from loguru import logger

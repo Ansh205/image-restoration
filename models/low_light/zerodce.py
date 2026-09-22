@@ -1,8 +1,9 @@
 """
-Zero-DCE++ model wrapper for low-light enhancement.
+Zero-DCE++: Zero-Reference Deep Curve Estimation for Low-Light Image Enhancement.
+Paper: https://arxiv.org/abs/2103.00860
 
-Zero-DCE++ (Zero-Reference Deep Curve Estimation) estimates pixel-wise curve
-parameter maps to enhance low-light images.
+[LEGACY / DISABLED] - Superceded as active low-light model by Retinexformer (models/low_light/retinexformer.py).
+Retained for backwards compatibility and easy switching.
 """
 from typing import Any
 

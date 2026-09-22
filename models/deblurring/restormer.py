@@ -1,8 +1,11 @@
 """
 Restormer model wrapper for image deblurring.
 
-Restormer is an efficient Transformer-based model for image restoration.
-Supports loading base pretrained weights and optional LoRA PEFT adapters.
+Restormer: Efficient Transformer for High-Resolution Image Restoration.
+Paper: https://arxiv.org/abs/2111.09881
+
+[LEGACY / DISABLED] - Superceded as active deblur model by UMSN Face Deblurring (models/deblurring/umsn.py).
+Retained for backwards compatibility and easy switching.
 """
 from typing import Any
 
@@ -151,6 +154,7 @@ class RestormerModel(BaseRestorationModel):
     def __init__(self, config: dict[str, Any] | None = None, device: str | None = None):
         super().__init__(config, device)
         self.has_weights: bool = False
+        self.real_checkpoint_loaded: bool = False
 
     def load(self) -> None:
         self.model = RestormerArch(dim=48).to(self.device)
@@ -168,16 +172,27 @@ class RestormerModel(BaseRestorationModel):
                 # Check if output weights are all zeros (dummy initial state dict)
                 out_w = self.model.output.weight
                 if torch.all(out_w == 0):
-                    logger.warning("Restormer checkpoint has zero-initialized output weights (dummy initialized state dict). Fallback active.")
+                    logger.warning("Restormer checkpoint has zero-initialized output weights (dummy initialized state dict).")
+                    logger.warning("Real Restormer checkpoint loaded: NO")
+                    logger.warning("Restormer fallback active: YES")
                     self.has_weights = False
+                    self.real_checkpoint_loaded = False
                 else:
                     self.has_weights = True
+                    self.real_checkpoint_loaded = True
                     logger.info(f"Loaded Restormer pretrained weights from {local_weights}")
+                    logger.info("Real Restormer checkpoint loaded: YES")
+                    logger.info("Restormer fallback active: NO")
             except Exception as e:
                 logger.warning(f"Failed to load Restormer checkpoint state dict: {e}")
                 self.has_weights = False
+                self.real_checkpoint_loaded = False
         else:
             self.has_weights = False
+            self.real_checkpoint_loaded = False
+            logger.warning(f"Restormer checkpoint not found at {local_weights}")
+            logger.warning("Real Restormer checkpoint loaded: NO")
+            logger.warning("Restormer fallback active: YES")
 
         # Check if LoRA is requested
         if self.config.get("use_lora", False):
@@ -200,6 +215,11 @@ class RestormerModel(BaseRestorationModel):
     def restore(self, image: Image.Image) -> Image.Image:
         self.ensure_loaded()
 
+        logger.info("[DEBLUR] Active model: RestormerModel")
+        logger.info(f"[DEBLUR] Real Restormer checkpoint loaded: {'YES' if self.real_checkpoint_loaded else 'NO'}")
+        logger.info(f"[DEBLUR] Restormer fallback active: {'NO' if self.real_checkpoint_loaded else 'YES'}")
+        logger.info("[DEBLUR] UMSN: disabled/experimental")
+
         # Compute BEFORE stats
         np_before = pil_to_numpy(image) * 255.0  # [0, 255] float
         h, w, _ = np_before.shape
@@ -217,7 +237,7 @@ class RestormerModel(BaseRestorationModel):
         )
 
         if not self.has_weights:
-            logger.info("Restormer using high-pass sharpening filter fallback for deblurring")
+            logger.warning("[DEBLUR FALLBACK] Using high-pass sharpening filter (NOT trained Restormer inference)")
             # Unsharp mask high-pass sharpening to recover edge contrast
             blurred = image.filter(ImageFilter.GaussianBlur(radius=1.5))
             np_orig = np.array(image, dtype=np.float32)

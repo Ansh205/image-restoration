@@ -217,8 +217,9 @@ class DegradationAnalyzer:
         self.noise_thresh = float(
             self.cfg
             .get("noise", {})
-            .get("sigma_threshold", 8.0)
+            .get("sigma_threshold", 3.0)
         )
+        logger.info(f"[NOISE] Activation threshold: {self.noise_thresh}")
 
         # ---------------------------------------------------------
         # Resolution configuration
@@ -313,6 +314,14 @@ class DegradationAnalyzer:
         )
 
         raw_metrics.update(noise_details)
+
+        noise_score = noise_details.get("estimated_noise_sigma", 0.0)
+        logger.info(
+            f"[NOISE]\n"
+            f"Noise score: {noise_score}\n"
+            f"Activation threshold: {self.noise_thresh}\n"
+            f"Actionable: {'YES' if is_noisy else 'NO'}"
+        )
 
         if is_noisy:
             degradations.append(

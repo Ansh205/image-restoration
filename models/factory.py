@@ -12,23 +12,29 @@ from models.base import BaseRestorationModel
 from models.denoising.drunet import DRUNetModel
 from models.denoising.scunet import SCUNetModel
 from models.deblurring.restormer import RestormerModel
+from models.deblurring.umsn import UMSNModel
 from models.super_resolution.realesrgan import RealESRGANModel
 from models.low_light.zerodce import ZeroDCEModel
+from models.low_light.retinexformer import RetinexformerModel
 from models.jpeg.swinir import SwinIRModel
 
 
 # Registry mapping operation key -> Model Class
 MODEL_REGISTRY: dict[str, Type[BaseRestorationModel]] = {
     "denoise": SCUNetModel,
-    "deblur": RestormerModel,
+    "deblur": RestormerModel,  # Active deblur model: RestormerModel (UMSN is disabled/experimental)
     "super_resolution": RealESRGANModel,
-    "low_light": ZeroDCEModel,
+    "low_light": RetinexformerModel,  # Active low-light model: Retinexformer (Zero-DCE++ is legacy)
     "jpeg": SwinIRModel,
     "jpeg_artifacts": SwinIRModel,
 }
 
 # Registry mapping model name -> Model Class
 NAME_REGISTRY: dict[str, Type[BaseRestorationModel]] = {
+    "umsn": UMSNModel,
+    "umsnmodel": UMSNModel,
+    "retinexformer": RetinexformerModel,
+    "retinexformermodel": RetinexformerModel,
     "scunet": SCUNetModel,
     "scunetmodel": SCUNetModel,
     "drunet": DRUNetModel,

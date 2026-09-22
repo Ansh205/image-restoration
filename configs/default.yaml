@@ -21,7 +21,7 @@ analyzer:
   blur:
     laplacian_threshold: 150.0   # Below this, image is considered blurry
   noise:
-    sigma_threshold: 8.0        # Above this, image is considered noisy
+    sigma_threshold: 3.0        # Above this, image is considered noisy
   resolution:
     min_dimension: 512           # Below this, image is considered low resolution
   exposure:
@@ -43,6 +43,13 @@ planner:
     - "super_resolution"
   # Minimum severity to trigger a model ("LOW", "MEDIUM", "HIGH")
   min_severity: "MEDIUM"
+  # Minimum activation thresholds for scheduling restoration models
+  min_activation_thresholds:
+    noise: 0.15
+    blur: 0.15
+    low_light: 0.15
+    jpeg_artifacts: 0.35
+    low_resolution: 0.15
 
 # --- Model Configuration ---
 models:

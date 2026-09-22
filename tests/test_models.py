@@ -7,6 +7,8 @@ from PIL import Image
 from models.base import BaseRestorationModel
 from models.factory import get_model, MODEL_REGISTRY
 from models.denoising.drunet import DRUNetModel
+from models.deblurring.umsn import UMSNModel
+from models.low_light.retinexformer import RetinexformerModel
 from models.deblurring.restormer import RestormerModel
 from models.super_resolution.realesrgan import RealESRGANModel
 from models.low_light.zerodce import ZeroDCEModel
@@ -34,6 +36,24 @@ class TestModelFactory:
 class TestDRUNet:
     def test_drunet_restoration(self, sample_image):
         model = DRUNetModel(device="cpu")
+        out = model.restore(sample_image)
+        assert isinstance(out, Image.Image)
+        assert out.size == sample_image.size
+        assert out.mode == "RGB"
+
+
+class TestUMSN:
+    def test_umsn_restoration(self, sample_image):
+        model = UMSNModel(device="cpu")
+        out = model.restore(sample_image)
+        assert isinstance(out, Image.Image)
+        assert out.size == sample_image.size
+        assert out.mode == "RGB"
+
+
+class TestRetinexformer:
+    def test_retinexformer_restoration(self, sample_image):
+        model = RetinexformerModel(device="cpu")
         out = model.restore(sample_image)
         assert isinstance(out, Image.Image)
         assert out.size == sample_image.size
@@ -75,3 +95,4 @@ class TestSwinIR:
         assert isinstance(out, Image.Image)
         assert out.size == sample_image.size
         assert out.mode == "RGB"
+

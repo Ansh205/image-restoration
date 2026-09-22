@@ -1223,7 +1223,7 @@ def estimate_edge_density(
 
 def detect_noise(
     image: Image.Image,
-    threshold: float = 1.0,
+    threshold: float = 3.0,
 ) -> Tuple[
     bool,
     float,
@@ -1279,104 +1279,33 @@ def detect_noise(
     # --------------------------------------------------------
     # Combine independent estimates
     # --------------------------------------------------------
-    #
-    # Do NOT use min().
-    #
-    # min() makes the detector extremely conservative.
-    #
-    # Instead use the median of the reliable estimates.
-    # --------------------------------------------------------
 
     estimates = [
         mad_sigma,
         residual_sigma,
     ]
 
-    if valid_smooth_tiles > 0:
-        estimates.append(
-            smooth_sigma
-        )
-
     effective_sigma = float(
         np.median(estimates)
     )
 
-    # --------------------------------------------------------
-    # Individual signals
-    # --------------------------------------------------------
-
-    strong_noise = (
-        effective_sigma >= threshold
-    )
-
-    residual_noise = (
-        residual_sigma >= threshold * 0.85
-    )
-
-    smooth_region_noise = (
-        valid_smooth_tiles > 0
-        and smooth_sigma >= threshold * 0.75
-    )
-
-    local_noise = (
-        local_noise_variation
-        >= threshold * 1.10
-    )
-
-    high_frequency_noise = (
-        high_frequency_energy
-        >= threshold * 1.10
-    )
-
-    # --------------------------------------------------------
-    # Agreement between estimators
-    # --------------------------------------------------------
-
-    agreement_count = sum(
-        [
-            mad_sigma >= threshold * 0.75,
-            residual_sigma >= threshold * 0.75,
-            (
-                valid_smooth_tiles > 0
-                and smooth_sigma >= threshold * 0.75
+    noise_score = float(
+        round(
+            max(
+                effective_sigma,
+                mad_sigma,
+                residual_sigma,
             ),
-        ]
-    )
-
-    estimator_agreement = (
-        agreement_count >= 2
+            3,
+        )
     )
 
     # --------------------------------------------------------
-    # Final decision
-    # --------------------------------------------------------
-    #
-    # We want multiple signals to agree.
-    #
-    # This avoids confusing:
-    #
-    #   texture
-    #   edges
-    #   JPEG artifacts
-    #   fine details
-    #
-    # with actual noise.
+    # Final decision: Actionable IF AND ONLY IF noise_score >= threshold
     # --------------------------------------------------------
 
-    is_noisy = (
-        strong_noise
-        or (
-            residual_noise
-            and local_noise
-        )
-        or (
-            estimator_agreement
-            and high_frequency_noise
-        )
-        or (
-            smooth_region_noise
-            and local_noise
-        )
+    is_noisy = bool(
+        noise_score >= threshold
     )
 
     # --------------------------------------------------------
@@ -1386,7 +1315,7 @@ def detect_noise(
     if is_noisy:
 
         excess = (
-            effective_sigma
+            noise_score
             - threshold
         )
 
@@ -1397,13 +1326,6 @@ def detect_noise(
                 1e-6,
             )
         )
-
-        # Additional evidence increases severity
-        if estimator_agreement:
-            severity += 0.10
-
-        if local_noise:
-            severity += 0.05
 
         severity = _clip(
             severity
@@ -1422,26 +1344,7 @@ def detect_noise(
     # currently no labeled noise dataset.
     # --------------------------------------------------------
 
-    evidence_count = sum(
-        [
-            strong_noise,
-            residual_noise,
-            smooth_region_noise,
-            local_noise,
-            high_frequency_noise,
-            estimator_agreement,
-        ]
-    )
-
-    confidence = 0.50 + (
-        evidence_count / 6.0
-    ) * 0.40
-
-    confidence = _clip(
-        confidence,
-        0.50,
-        0.90,
-    )
+    confidence = 0.85 if is_noisy else 0.75
 
     # --------------------------------------------------------
     # Detailed metrics
@@ -1450,7 +1353,7 @@ def detect_noise(
     details = {
 
         "estimated_noise_sigma": round(
-            effective_sigma,
+            noise_score,
             3,
         ),
 
@@ -1490,31 +1393,6 @@ def detect_noise(
 
         "noise_sigma_threshold": float(
             threshold
-        ),
-
-        "noise_signals": {
-            "strong_noise": bool(
-                strong_noise
-            ),
-            "residual_noise": bool(
-                residual_noise
-            ),
-            "smooth_region_noise": bool(
-                smooth_region_noise
-            ),
-            "local_noise": bool(
-                local_noise
-            ),
-            "high_frequency_noise": bool(
-                high_frequency_noise
-            ),
-            "estimator_agreement": bool(
-                estimator_agreement
-            ),
-        },
-
-        "noise_agreement_count": int(
-            agreement_count
         ),
 
         "image_width": int(w),
