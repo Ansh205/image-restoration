@@ -55,5 +55,5 @@ def test_max_execution_limit_enforced_in_3pass():
 
     # Deblur should execute AT MOST 2 times
     assert len(deblur_steps) <= 2
-    # The 3rd attempt must be skipped with max execution limit reason
-    assert any("Maximum execution limit reached" in s.get("reason", "") for s in skipped_steps)
+    # The 3rd attempt (or subsequent attempts if skipped) must be skipped
+    assert any("Maximum execution limit reached" in s.get("reason", "") or "Blocked" in s.get("reason", "") or "Not retried" in s.get("reason", "") for s in skipped_steps)

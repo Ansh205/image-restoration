@@ -356,6 +356,7 @@ class RestorationEngine:
         global_step_counter = 1
         operation_history = []
         any_operation_accepted = False
+        pass1_candidate_created = False
 
         per_pass_info = {}
 
@@ -365,16 +366,10 @@ class RestorationEngine:
         logger.info(f"[STATE] Baseline image size: {baseline_image.width}x{baseline_image.height}")
         logger.info(f"[STATE] Initial Candidate = Baseline image")
 
-        # Track execution attempts per pass
+        # Track execution attempts and effect states per operation
         pass1_analysis = None
         seen_ops = set()
-        operation_counts: Dict[str, int] = {
-            "deblur": 0,
-            "denoise": 0,
-            "low_light": 0,
-            "super_resolution": 0,
-            "jpeg_artifacts": 0,
-        }
+        op_tracker: Dict[str, Dict[str, Any]] = {}
 
         for pass_num in (1, 2, 3):
             logger.info("")
@@ -408,10 +403,39 @@ class RestorationEngine:
 
             pass_executed_ops = []
 
-            # 3. Execute planned operations if under maximum execution limit (2/2)
+            # 3. Execute planned operations if safe and under maximum execution limit (2/2)
             for op in planned_ops:
-                current_count = operation_counts.get(op, 0)
-                if current_count >= 2:
+                info = op_tracker.setdefault(op, {"attempt_count": 0, "last_effect": "NOT_RUN"})
+
+                # Check if blocked due to previous HARMFUL or SEVERELY_HARMFUL attempt (applies in Pass 2 and Pass 3)
+                '''
+                if pass_num > 1 and (info["blocked"] or info["last_effect"] in ["HARMFUL", "SEVERELY_HARMFUL"]):
+                    logger.info("[SKIP]")
+                    logger.info(f"{op}")
+                    logger.info("Reason:")
+                    logger.info(f"Operation blocked due to previous {info['last_effect']} effect")
+                    operation_history.append({
+                        "pass": pass_num,
+                        "operation": op,
+                        "effect": "SKIPPED",
+                        "reason": f"Blocked due to previous {info['last_effect']} effect",
+                    })
+                    continue'''
+                if pass_num > 1 and info["last_effect"] in ["HARMFUL", "SEVERELY_HARMFUL"]:
+                    logger.info("[SKIP]")
+                    logger.info(f"{op}")
+                    logger.info("Reason:")
+                    logger.info(f"Not retrying after previous {info['last_effect']} effect")
+
+                    operation_history.append({"pass": pass_num,
+                        "operation": op,
+                        "effect": "SKIPPED",
+                        "reason": f"Not retried after previous {info['last_effect']} effect",
+                    })
+
+                    continue
+
+                if info["attempt_count"] >= self.MAX_OPERATION_ATTEMPTS:
                     logger.info("[SKIP]")
                     logger.info(f"{op}")
                     logger.info("Reason:")
@@ -424,8 +448,7 @@ class RestorationEngine:
                     })
                     continue
 
-                operation_counts[op] = current_count + 1
-                op_run_count = operation_counts[op]
+                op_run_count = info["attempt_count"] + 1
                 seen_ops.add(op)
 
                 logger.info("[OPERATION]")
@@ -477,17 +500,33 @@ class RestorationEngine:
                 logger.info(f"[REASON]")
                 logger.info(f"{eval_res.reason}")
 
-                # 5. Update Candidate Image State immediately
+                # 5. Classify Operation Effect and Update Candidate Image State
+                effect = self._classify_effect(eval_res, op)
                 if eval_res.decision == "KEEP":
+                    effect = "IMPROVING"
+
+                info["attempt_count"] += 1
+                info["last_effect"] = effect
+
+                logger.info(f"[OPERATION EFFECT] Effect: {effect}")
+
+                if pass_num == 1:
                     current_candidate = model_output
-                    any_operation_accepted = True
                     pass_executed_ops.append(op)
-                    logger.info(f"[CANDIDATE]")
-                    logger.info(f"Updated with accepted '{op}' result ({current_candidate.width}x{current_candidate.height})")
+                    pass1_candidate_created = True
+                    logger.info(f"[CANDIDATE - PASS 1] Candidate UPDATED with '{op}' output regardless of evaluator decision: {eval_res.decision}")
                 else:
-                    # DISCARD: Candidate remains before
-                    logger.info(f"[CANDIDATE]")
-                    logger.info(f"Keeping previous accepted candidate. Discarded '{op}' result.")
+                    if effect == "IMPROVING":
+                        current_candidate = model_output
+                        any_operation_accepted = True
+                        pass_executed_ops.append(op)
+                        logger.info(f"[CANDIDATE] Candidate: UPDATED with accepted '{op}' result ({current_candidate.width}x{current_candidate.height})")
+                    else:
+                        logger.info(
+                            f"[CANDIDATE] Candidate: UNCHANGED "
+                            f"(keeping previous accepted candidate). "
+                            f"Operation output rejected as {effect}."
+                        )
 
                 # Compute pixel diff metrics for step record
                 if image_before.size != model_output.size:
@@ -547,7 +586,7 @@ class RestorationEngine:
         logger.info("[FINAL RESULT SUMMARY]")
         logger.info("=" * 60)
 
-        if any_operation_accepted:
+        if any_operation_accepted or pass1_candidate_created:
             final_output_image = current_candidate
             final_decision = "KEEP"
             final_reason = "Accepted candidate from 3-pass restoration sequence."
