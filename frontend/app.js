@@ -223,21 +223,76 @@ function renderPipelineSteps(steps, totalTime) {
     stepsDiv.innerHTML = stepsHtml;
 }
 
+let currentImageId = null;
+let currentRestoreData = null;
+
+const showIntermediateToggle = document.getElementById('show-intermediate-toggle');
+if (showIntermediateToggle) {
+    showIntermediateToggle.addEventListener('change', () => {
+        if (currentImageId && currentRestoreData) {
+            renderResultComparison(currentImageId, currentRestoreData);
+        }
+    });
+}
+
 function renderResultComparison(imageId, restoreData) {
+    currentImageId = imageId;
+    currentRestoreData = restoreData;
+
     const resultSection = document.getElementById('result-section');
-    const origImgElem = document.getElementById('original-image');
-    const restImgElem = document.getElementById('restored-image');
+    const comparisonView = document.getElementById('comparison-view');
     const metricsPanel = document.getElementById('metrics-panel');
     const downloadBtn = document.getElementById('download-btn');
 
     resultSection.classList.remove('hidden');
 
-    // Set Image URLs
     const origUrl = `/api/image/${imageId}`;
     const restoredUrl = `/api/image/restored_${imageId}`;
 
-    origImgElem.src = origUrl;
-    restImgElem.src = restoredUrl;
+    const showIntermediate = showIntermediateToggle?.checked || false;
+    const acceptedSteps = (restoreData.pipeline_steps || []).filter(step => step.is_accepted && step.image_url);
+
+    if (!showIntermediate || acceptedSteps.length === 0) {
+        comparisonView.innerHTML = `
+            <div class="image-panel">
+                <h3>Original</h3>
+                <img id="original-image" src="${origUrl}" alt="Original image">
+            </div>
+            <div class="image-panel">
+                <h3>Restored</h3>
+                <img id="restored-image" src="${restoredUrl}" alt="Restored image">
+            </div>
+        `;
+    } else {
+        let viewHtml = `
+            <div class="image-panel">
+                <h3>Original</h3>
+                <img src="${origUrl}" alt="Original image">
+                <p class="image-panel-meta" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">Original Baseline</p>
+            </div>
+        `;
+
+        acceptedSteps.forEach(step => {
+            const opName = step.operation.replace(/_/g, ' ').toUpperCase();
+            viewHtml += `
+                <div class="image-panel">
+                    <h3>Step ${step.step_number} — Pass ${step.pass_number} — ${opName}</h3>
+                    <img src="${step.image_url}" alt="Step ${step.step_number} intermediate output">
+                    <p class="image-panel-meta" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">Model: ${step.model_name} | Size: ${step.output_size}</p>
+                </div>
+            `;
+        });
+
+        viewHtml += `
+            <div class="image-panel">
+                <h3>Final Result</h3>
+                <img src="${restoredUrl}" alt="Final restored image">
+                <p class="image-panel-meta" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">Final Output</p>
+            </div>
+        `;
+
+        comparisonView.innerHTML = viewHtml;
+    }
 
     const m = restoreData.metrics || {};
     metricsPanel.innerHTML = `
@@ -257,7 +312,6 @@ function renderResultComparison(imageId, restoreData) {
         </div>
     `;
 
-    // Download Button setup
     downloadBtn.onclick = () => {
         const a = document.createElement('a');
         a.href = restoredUrl;

@@ -127,15 +127,46 @@ main {
 
 /* --- Comparison View --- */
 #comparison-view {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
     gap: 1rem;
+    overflow-x: auto;
+    padding-bottom: 0.75rem;
+    scroll-behavior: smooth;
+}
+
+#comparison-view::-webkit-scrollbar {
+    height: 8px;
+}
+
+#comparison-view::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+    border-radius: 4px;
+}
+
+#comparison-view::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+#comparison-view::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+}
+
+.image-panel {
+    flex: 1 1 260px;
+    min-width: 240px;
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
 }
 
 .image-panel img {
     width: 100%;
     border-radius: 8px;
     border: 1px solid var(--border);
+    object-fit: contain;
 }
 
 .image-panel h3 {

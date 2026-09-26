@@ -538,6 +538,8 @@ class RestorationEngine:
                 step_mad = float(np.mean(step_diff))
                 step_changed_pct = float(np.mean(step_diff > 1.0) * 100.0)
 
+                is_step_accepted = (pass_num == 1) or (effect == "IMPROVING")
+
                 step_info = {
                     "step_number": global_step_counter,
                     "pass_number": pass_num,
@@ -560,7 +562,10 @@ class RestorationEngine:
                     "before_metrics": eval_res.before_metrics,
                     "after_metrics": eval_res.after_metrics,
                     "improvement_metrics": eval_res.improvement_metrics,
+                    "is_accepted": is_step_accepted,
                 }
+                if is_step_accepted:
+                    step_info["output_image"] = model_output.copy()
                 all_step_records.append(step_info)
                 global_step_counter += 1
 

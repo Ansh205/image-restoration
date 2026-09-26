@@ -98,6 +98,29 @@ async def restore_image(req: RestoreRequest) -> RestorationResponse:
         "meta": restored_meta_obj,
     }
 
+    # Process intermediate step images for accepted outputs
+    pipeline_steps = engine_result.pipeline_steps
+    for step in pipeline_steps:
+        if step.get("is_accepted") and "output_image" in step:
+            step_img = step.pop("output_image")
+            inter_id = f"intermediate_{req.image_id}_step_{step['step_number']}"
+            _image_store[inter_id] = {
+                "original": step_img,
+                "for_inference": step_img,
+                "was_resized": False,
+                "meta": ImageMetaSchema(
+                    width=step_img.width,
+                    height=step_img.height,
+                    channels=3,
+                    file_size_bytes=0,
+                    format=orig_meta.format or "PNG",
+                    filename=f"intermediate_step_{step['step_number']}.png",
+                ),
+            }
+            step["image_url"] = f"/api/image/{inter_id}"
+        elif "output_image" in step:
+            step.pop("output_image")
+
     return RestorationResponse(
         success=True,
         image_id=req.image_id,
