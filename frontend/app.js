@@ -202,12 +202,22 @@ function renderPipelineSteps(steps, totalTime) {
 
     let stepsHtml = '<div class="pipeline-flow">';
     steps.forEach(step => {
+        let modelDisplayHtml = `Model: ${step.model_name}`;
+        if (step.real_restormer_checkpoint_loaded !== undefined && step.real_restormer_checkpoint_loaded !== null) {
+            if (step.real_restormer_checkpoint_loaded && !step.restormer_fallback_active) {
+                modelDisplayHtml += `<br>Mode: Neural inference`;
+            } else if (!step.real_restormer_checkpoint_loaded && step.restormer_fallback_active) {
+                const fb = step.fallback_type || 'High-pass sharpening';
+                modelDisplayHtml += `<br>Mode: Fallback<br><small style="color: var(--text-secondary);">Fallback: ${fb}</small>`;
+            }
+        }
+
         stepsHtml += `
             <div class="step-card">
                 <div class="step-num">Step ${step.step_number}</div>
                 <div class="step-details">
                     <span class="step-op">${step.operation.replace('_', ' ').toUpperCase()}</span>
-                    <span class="step-model">Model: ${step.model_name}</span>
+                    <span class="step-model">${modelDisplayHtml}</span>
                 </div>
                 <div class="step-meta">
                     <span>⚡ ${step.execution_time_seconds}s</span>
@@ -274,11 +284,25 @@ function renderResultComparison(imageId, restoreData) {
 
         acceptedSteps.forEach(step => {
             const opName = step.operation.replace(/_/g, ' ').toUpperCase();
+            let stepMetaText = `Model: ${step.model_name}`;
+            if (step.real_restormer_checkpoint_loaded !== undefined && step.real_restormer_checkpoint_loaded !== null) {
+                if (step.real_restormer_checkpoint_loaded && !step.restormer_fallback_active) {
+                    stepMetaText += `<br>Mode: Neural inference<br>Size: ${step.output_size}`;
+                } else if (!step.real_restormer_checkpoint_loaded && step.restormer_fallback_active) {
+                    const fbType = step.fallback_type || 'High-pass sharpening';
+                    stepMetaText += `<br>Mode: Fallback<br>Fallback: ${fbType}<br>Size: ${step.output_size}`;
+                } else {
+                    stepMetaText += ` | Size: ${step.output_size}`;
+                }
+            } else {
+                stepMetaText += ` | Size: ${step.output_size}`;
+            }
+
             viewHtml += `
                 <div class="image-panel">
                     <h3>Step ${step.step_number} — Pass ${step.pass_number} — ${opName}</h3>
                     <img src="${step.image_url}" alt="Step ${step.step_number} intermediate output">
-                    <p class="image-panel-meta" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">Model: ${step.model_name} | Size: ${step.output_size}</p>
+                    <p class="image-panel-meta" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">${stepMetaText}</p>
                 </div>
             `;
         });

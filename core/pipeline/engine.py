@@ -408,43 +408,33 @@ class RestorationEngine:
                 info = op_tracker.setdefault(op, {"attempt_count": 0, "last_effect": "NOT_RUN"})
 
                 # Check if blocked due to previous HARMFUL or SEVERELY_HARMFUL attempt (applies in Pass 2 and Pass 3)
-                '''
-                if pass_num > 1 and (info["blocked"] or info["last_effect"] in ["HARMFUL", "SEVERELY_HARMFUL"]):
+                if pass_num > 1 and info["last_effect"] in ["HARMFUL", "SEVERELY_HARMFUL"]:
+                    skip_reason = f"Not retried after previous {info['last_effect']} effect"
                     logger.info("[SKIP]")
-                    logger.info(f"{op}")
-                    logger.info("Reason:")
-                    logger.info(f"Operation blocked due to previous {info['last_effect']} effect")
+                    logger.info(f"Pass: {pass_num}")
+                    logger.info(f"Operation: {op}")
+                    logger.info(f"Reason: {skip_reason}")
+
                     operation_history.append({
                         "pass": pass_num,
                         "operation": op,
                         "effect": "SKIPPED",
-                        "reason": f"Blocked due to previous {info['last_effect']} effect",
-                    })
-                    continue'''
-                if pass_num > 1 and info["last_effect"] in ["HARMFUL", "SEVERELY_HARMFUL"]:
-                    logger.info("[SKIP]")
-                    logger.info(f"{op}")
-                    logger.info("Reason:")
-                    logger.info(f"Not retrying after previous {info['last_effect']} effect")
-
-                    operation_history.append({"pass": pass_num,
-                        "operation": op,
-                        "effect": "SKIPPED",
-                        "reason": f"Not retried after previous {info['last_effect']} effect",
+                        "reason": skip_reason,
                     })
 
                     continue
 
                 if info["attempt_count"] >= self.MAX_OPERATION_ATTEMPTS:
+                    skip_reason = f"Maximum execution limit reached ({self.MAX_OPERATION_ATTEMPTS}/{self.MAX_OPERATION_ATTEMPTS})"
                     logger.info("[SKIP]")
-                    logger.info(f"{op}")
-                    logger.info("Reason:")
-                    logger.info("Maximum execution limit reached (2/2)")
+                    logger.info(f"Pass: {pass_num}")
+                    logger.info(f"Operation: {op}")
+                    logger.info(f"Reason: {skip_reason}")
                     operation_history.append({
                         "pass": pass_num,
                         "operation": op,
                         "effect": "SKIPPED",
-                        "reason": "Maximum execution limit reached (2/2)",
+                        "reason": skip_reason,
                     })
                     continue
 
@@ -510,25 +500,7 @@ class RestorationEngine:
 
                 logger.info(f"[OPERATION EFFECT] Effect: {effect}")
 
-                if pass_num == 1:
-                    current_candidate = model_output
-                    pass_executed_ops.append(op)
-                    pass1_candidate_created = True
-                    logger.info(f"[CANDIDATE - PASS 1] Candidate UPDATED with '{op}' output regardless of evaluator decision: {eval_res.decision}")
-                else:
-                    if effect == "IMPROVING":
-                        current_candidate = model_output
-                        any_operation_accepted = True
-                        pass_executed_ops.append(op)
-                        logger.info(f"[CANDIDATE] Candidate: UPDATED with accepted '{op}' result ({current_candidate.width}x{current_candidate.height})")
-                    else:
-                        logger.info(
-                            f"[CANDIDATE] Candidate: UNCHANGED "
-                            f"(keeping previous accepted candidate). "
-                            f"Operation output rejected as {effect}."
-                        )
-
-                # Compute pixel diff metrics for step record
+                # Compute pixel diff metrics for step record & meaningful change indicator
                 if image_before.size != model_output.size:
                     step_inp_eval = np.array(image_before.resize(model_output.size, Image.Resampling.LANCZOS).convert("RGB"), dtype=np.float32)
                 else:
@@ -537,6 +509,46 @@ class RestorationEngine:
                 step_diff = np.abs(step_out_eval - step_inp_eval)
                 step_mad = float(np.mean(step_diff))
                 step_changed_pct = float(np.mean(step_diff > 1.0) * 100.0)
+
+                meaningful_change = "YES" if (step_changed_pct > 0.1 or step_mad > 0.5) else "NO"
+
+                if pass_num == 1:
+                    current_candidate = model_output
+                    pass_executed_ops.append(op)
+                    pass1_candidate_created = True
+                    candidate_updated = "YES"
+                    logger.info("[CANDIDATE - PASS 1]")
+                    logger.info(f"Operation: {op}")
+                    logger.info(f"Evaluator Decision: {eval_res.decision}")
+                    logger.info(f"Effect: {effect}")
+                    logger.info("Candidate Updated: YES")
+                    logger.info("Candidate Policy: PASS_1_FORCE_UPDATE")
+                    logger.info(f"Meaningful Image Change: {meaningful_change}")
+                else:
+                    if effect == "IMPROVING":
+                        current_candidate = model_output
+                        any_operation_accepted = True
+                        pass_executed_ops.append(op)
+                        candidate_updated = "YES"
+                        logger.info(f"[CANDIDATE] Candidate: UPDATED with accepted '{op}' result ({current_candidate.width}x{current_candidate.height})")
+                    else:
+                        candidate_updated = "NO"
+                        logger.info(
+                            f"[CANDIDATE] Candidate: UNCHANGED "
+                            f"(keeping previous accepted candidate). "
+                            f"Operation output rejected as {effect}."
+                        )
+
+                logger.info("[CANDIDATE TRANSITION]")
+                logger.info(f"Pass: {pass_num}")
+                logger.info(f"Step: {global_step_counter}")
+                logger.info(f"Operation: {op}")
+                logger.info(f"Before Size: {input_size[0]}x{input_size[1]}")
+                logger.info(f"After Size: {output_size[0]}x{output_size[1]}")
+                logger.info(f"Evaluator Decision: {eval_res.decision}")
+                logger.info(f"Effect: {effect}")
+                logger.info(f"Candidate Updated: {candidate_updated}")
+                logger.info(f"Meaningful Image Change: {meaningful_change}")
 
                 is_step_accepted = (pass_num == 1) or (effect == "IMPROVING")
 
@@ -559,11 +571,21 @@ class RestorationEngine:
                     "noise_sigma_change_percent": eval_res.improvement_metrics.get("noise_sigma_pct", 0.0),
                     "mean_absolute_difference": round(step_mad, 3),
                     "changed_pixels_percent": round(step_changed_pct, 2),
+                    "meaningful_change": meaningful_change,
                     "before_metrics": eval_res.before_metrics,
                     "after_metrics": eval_res.after_metrics,
                     "improvement_metrics": eval_res.improvement_metrics,
                     "is_accepted": is_step_accepted,
                 }
+
+                if hasattr(model, "real_checkpoint_loaded"):
+                    real_chk = getattr(model, "real_checkpoint_loaded", False)
+                    fallback_act = not real_chk
+                    step_info["real_restormer_checkpoint_loaded"] = real_chk
+                    step_info["restormer_fallback_active"] = fallback_act
+                    if fallback_act:
+                        step_info["fallback_type"] = "High-pass sharpening"
+
                 if is_step_accepted:
                     step_info["output_image"] = model_output.copy()
                 all_step_records.append(step_info)
@@ -584,11 +606,40 @@ class RestorationEngine:
             }
 
         # ===================================================================
-        # FINAL OUTPUT RESOLUTION & RECONSTRUCTION
+        # RESTORATION PIPELINE SUMMARY & FINAL OUTPUT RESOLUTION
         # ===================================================================
         logger.info("")
         logger.info("=" * 60)
-        logger.info("[FINAL RESULT SUMMARY]")
+        logger.info("[RESTORATION PIPELINE SUMMARY]")
+        logger.info("=" * 60)
+        logger.info(f"Original: {baseline_image.width}x{baseline_image.height}")
+
+        for p in (1, 2, 3):
+            logger.info("")
+            logger.info(f"PASS {p}")
+            pass_steps = [s for s in all_step_records if s.get("pass_number") == p]
+            pass_skips = [s for s in operation_history if s.get("pass") == p and s.get("effect") == "SKIPPED"]
+
+            if not pass_steps and not pass_skips:
+                logger.info("  (No operations executed or skipped)")
+
+            for s in pass_steps:
+                if p == 1:
+                    c_status = "" if s.get("meaningful_change") == "YES" else " (unchanged)"
+                else:
+                    c_status = "" if s.get("is_accepted") else " (candidate unchanged)"
+                logger.info(f"  Step {s['step_number']}: {s['operation']:<20} → {s['evaluator_decision']:<10} → {s['output_size']}{c_status}")
+
+            for sk in pass_skips:
+                logger.info(f"  {sk['operation']:<27} → SKIPPED    → {sk['reason']}")
+
+        logger.info("")
+        logger.info("FINAL")
+        logger.info(f"  Candidate: {current_candidate.width}x{current_candidate.height}")
+        logger.info(f"  Decision: {'KEEP' if (any_operation_accepted or pass1_candidate_created) else 'DISCARD'}")
+        logger.info("=" * 60)
+
+        logger.info("")
         logger.info("=" * 60)
 
         if any_operation_accepted or pass1_candidate_created:
