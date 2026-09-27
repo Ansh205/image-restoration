@@ -1,11 +1,12 @@
 /**
  * AI Image Restoration — Frontend Logic
- * Phase 5: Complete Upload, Analyze, Pipeline Routing, & Restoration
+ * Supports Default, OSDFace, and Both Restoration Modes
  */
 
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const uploadBtn = document.getElementById('upload-btn');
+const osdfaceWarning = document.getElementById('osdface-warning');
 
 let selectedFile = null;
 
@@ -34,6 +35,20 @@ fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         handleFileSelect(e.target.files[0]);
     }
+});
+
+// --- Mode Radio Button Handlers ---
+document.querySelectorAll('input[name="restoration_mode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (osdfaceWarning) {
+            if (val === 'osdface' || val === 'both') {
+                osdfaceWarning.style.display = 'block';
+            } else {
+                osdfaceWarning.style.display = 'none';
+            }
+        }
+    });
 });
 
 // --- File Selection ---
@@ -80,6 +95,10 @@ uploadBtn.addEventListener('click', async () => {
 
         const imageId = uploadData.image_id;
 
+        // Get selected restoration mode
+        const modeRadio = document.querySelector('input[name="restoration_mode"]:checked');
+        const selectedMode = modeRadio ? modeRadio.value : 'default';
+
         // 2. Analyze Image Degradations
         uploadBtn.textContent = 'Running Degradation Analyzer...';
         const analyzeResp = await fetch('/api/analyze', {
@@ -100,14 +119,15 @@ uploadBtn.addEventListener('click', async () => {
             body: JSON.stringify({
                 image_id: imageId,
                 upscale_4k: isUpscale4k,
+                restoration_mode: selectedMode,
             }),
         });
 
         const restoreData = await restoreResp.json();
 
         if (restoreResp.ok && restoreData.success) {
-            renderPipelineSteps(restoreData.pipeline_steps, restoreData.inference_time_seconds);
-            renderResultComparison(imageId, restoreData);
+            renderPipelineSteps(restoreData.pipeline_steps, restoreData.inference_time_seconds, selectedMode);
+            renderResultComparison(imageId, restoreData, selectedMode);
         } else {
             alert(`Restoration error: ${restoreData.detail || 'Failed to restore image'}`);
         }
@@ -151,7 +171,6 @@ function renderAnalysisReport(uploadData, analyzeData) {
     }
 
     let metricsHtml = '<div class="metrics-grid">';
-    // Always show dimensions first
     metricsHtml += `
         <div class="metric-box">
             <span class="metric-label">Dimensions</span>
@@ -159,7 +178,6 @@ function renderAnalysisReport(uploadData, analyzeData) {
         </div>
     `;
 
-    // Render all raw metrics dynamically directly from backend payload
     for (const [key, val] of Object.entries(metrics)) {
         if (key === "dimensions") continue;
         const formattedKey = key.replace(/_/g, ' ').toUpperCase();
@@ -189,7 +207,7 @@ function renderAnalysisReport(uploadData, analyzeData) {
     `;
 }
 
-function renderPipelineSteps(steps, totalTime) {
+function renderPipelineSteps(steps, totalTime, mode) {
     const pipelineSection = document.getElementById('pipeline-section');
     const stepsDiv = document.getElementById('pipeline-steps');
 
@@ -200,7 +218,8 @@ function renderPipelineSteps(steps, totalTime) {
         return;
     }
 
-    let stepsHtml = '<div class="pipeline-flow">';
+    let stepsHtml = `<p style="font-weight: 600; margin-bottom: 8px;">Executed Mode: <span style="text-transform: uppercase; color: #2563eb;">${mode}</span></p>`;
+    stepsHtml += '<div class="pipeline-flow">';
     steps.forEach(step => {
         let modelDisplayHtml = `Model: ${step.model_name}`;
         if (step.real_restormer_checkpoint_loaded !== undefined && step.real_restormer_checkpoint_loaded !== null) {
@@ -210,24 +229,26 @@ function renderPipelineSteps(steps, totalTime) {
                 const fb = step.fallback_type || 'High-pass sharpening';
                 modelDisplayHtml += `<br>Mode: Fallback<br><small style="color: var(--text-secondary);">Fallback: ${fb}</small>`;
             }
+        } else if (step.model_name === 'OSDFace') {
+            modelDisplayHtml += `<br>Inference: One-step diffusion<br>Faces: ${step.faces_detected ?? 1}`;
         }
 
         stepsHtml += `
             <div class="step-card">
                 <div class="step-num">Step ${step.step_number}</div>
                 <div class="step-details">
-                    <span class="step-op">${step.operation.replace('_', ' ').toUpperCase()}</span>
+                    <span class="step-op">${step.operation.replace(/_/g, ' ').toUpperCase()}</span>
                     <span class="step-model">${modelDisplayHtml}</span>
                 </div>
                 <div class="step-meta">
                     <span>⚡ ${step.execution_time_seconds}s</span>
-                    <span>${step.input_size} → ${step.output_size}</span>
+                    <span>${step.input_size || ''} → ${step.output_size || ''}</span>
                 </div>
             </div>
         `;
     });
     stepsHtml += `</div>
-        <p class="pipeline-total">Total Pipeline Execution Time: <strong>${totalTime.toFixed(2)} seconds</strong></p>
+        <p class="pipeline-total">Total Execution Time: <strong>${totalTime.toFixed(2)} seconds</strong></p>
     `;
 
     stepsDiv.innerHTML = stepsHtml;
@@ -235,19 +256,21 @@ function renderPipelineSteps(steps, totalTime) {
 
 let currentImageId = null;
 let currentRestoreData = null;
+let currentMode = 'default';
 
 const showIntermediateToggle = document.getElementById('show-intermediate-toggle');
 if (showIntermediateToggle) {
     showIntermediateToggle.addEventListener('change', () => {
         if (currentImageId && currentRestoreData) {
-            renderResultComparison(currentImageId, currentRestoreData);
+            renderResultComparison(currentImageId, currentRestoreData, currentMode);
         }
     });
 }
 
-function renderResultComparison(imageId, restoreData) {
+function renderResultComparison(imageId, restoreData, mode) {
     currentImageId = imageId;
     currentRestoreData = restoreData;
+    currentMode = mode || 'default';
 
     const resultSection = document.getElementById('result-section');
     const comparisonView = document.getElementById('comparison-view');
@@ -259,6 +282,111 @@ function renderResultComparison(imageId, restoreData) {
     const origUrl = `/api/image/${imageId}`;
     const restoredUrl = `/api/image/restored_${imageId}`;
 
+    // BOTH MODE: Display Standard vs OSDFace Side-by-Side
+    if (currentMode === 'both') {
+        const osdData = restoreData.osdface_result || {};
+        let osdPanelHtml = '';
+
+        if (osdData.skipped) {
+            osdPanelHtml = `
+                <div class="image-panel" style="border: 2px dashed #cbd5e1;">
+                    <h3>OSDFACE RESTORATION</h3>
+                    <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                        <p><strong>OSDFace Execution: SKIPPED</strong></p>
+                        <p>Reason: ${osdData.reason || 'No face detected'}</p>
+                        <p>Faces detected: 0</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            osdPanelHtml = `
+                <div class="image-panel" style="border: 2px solid #3b82f6;">
+                    <h3>OSDFACE RESTORATION</h3>
+                    <img src="${osdData.image_url}" alt="OSDFace Result">
+                    <div class="image-panel-meta" style="font-size: 0.85rem; margin-top: 6px;">
+                        <p><strong>Model:</strong> ${osdData.model_name || 'OSDFace'}</p>
+                        <p><strong>Faces Detected:</strong> ${osdData.faces_detected}</p>
+                        <p><strong>Inference:</strong> ${osdData.inference_mode}</p>
+                        <p><strong>Time:</strong> ${osdData.execution_time_seconds}s</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        comparisonView.innerHTML = `
+            <div class="image-panel">
+                <h3>Original Baseline</h3>
+                <img src="${origUrl}" alt="Original image">
+            </div>
+            <div class="image-panel">
+                <h3>STANDARD RESTORATION</h3>
+                <img src="${restoredUrl}" alt="Standard Restoration Result">
+                <div class="image-panel-meta" style="font-size: 0.85rem; margin-top: 6px;">
+                    <p><strong>Pipeline Operations:</strong> ${(restoreData.pipeline_steps || []).map(s => s.operation).join(', ') || 'Default'}</p>
+                    <p><strong>Execution Time:</strong> ${restoreData.inference_time_seconds}s</p>
+                </div>
+            </div>
+            ${osdPanelHtml}
+        `;
+
+        // Side-by-side factual metrics comparison table
+        const stdM = restoreData.metrics || {};
+        const osdM = osdData.metrics || {};
+
+        metricsPanel.innerHTML = `
+            <div class="comparison-metrics-container">
+                <h3>Side-by-Side Measurements</h3>
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Metric / Measurement</th>
+                            <th>Standard Restoration</th>
+                            <th>OSDFace Restoration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="font-weight: 600;">Model / Pipeline</td>
+                            <td>${(restoreData.pipeline_steps || []).map(s => s.model_name).join(' + ') || 'Standard'}</td>
+                            <td>${osdData.model_name || 'OSDFace (One-step)'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">Faces Detected</td>
+                            <td>N/A (Full Image)</td>
+                            <td>${osdData.faces_detected ?? 0}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">Sharpness Change</td>
+                            <td>${stdM.sharpness_change_percent ?? 0}%</td>
+                            <td>${osdM.sharpness_change_percent ?? 'N/A'}%</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">Mean Abs Difference</td>
+                            <td>${stdM.mean_absolute_difference ?? 'N/A'}</td>
+                            <td>${osdM.mean_absolute_difference ?? 'N/A'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">Execution Time</td>
+                            <td>${restoreData.inference_time_seconds}s</td>
+                            <td>${osdData.execution_time_seconds ?? 'N/A'}s</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        downloadBtn.onclick = () => {
+            const a = document.createElement('a');
+            a.href = restoredUrl;
+            a.download = `standard_${restoreData.original_meta.filename}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
+        return;
+    }
+
+    // DEFAULT OR OSDFACE SINGLE MODE:
     const showIntermediate = showIntermediateToggle?.checked || false;
     const acceptedSteps = (restoreData.pipeline_steps || []).filter(step => step.is_accepted && step.image_url);
 
@@ -269,7 +397,7 @@ function renderResultComparison(imageId, restoreData) {
                 <img id="original-image" src="${origUrl}" alt="Original image">
             </div>
             <div class="image-panel">
-                <h3>Restored</h3>
+                <h3>${currentMode === 'osdface' ? 'OSDFace Restored' : 'Restored'}</h3>
                 <img id="restored-image" src="${restoredUrl}" alt="Restored image">
             </div>
         `;
@@ -300,7 +428,7 @@ function renderResultComparison(imageId, restoreData) {
 
             viewHtml += `
                 <div class="image-panel">
-                    <h3>Step ${step.step_number} — Pass ${step.pass_number} — ${opName}</h3>
+                    <h3>Step ${step.step_number} — ${opName}</h3>
                     <img src="${step.image_url}" alt="Step ${step.step_number} intermediate output">
                     <p class="image-panel-meta" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">${stepMetaText}</p>
                 </div>
@@ -333,6 +461,7 @@ function renderResultComparison(imageId, restoreData) {
                 <span class="q-label">Restored Resolution</span>
                 <span class="q-val">${restoreData.restored_meta.width} x ${restoreData.restored_meta.height}</span>
             </div>
+            ${m.faces_detected !== undefined ? `<div class="q-item"><span class="q-label">Faces Detected</span><span class="q-val">${m.faces_detected}</span></div>` : ''}
         </div>
     `;
 

@@ -82,11 +82,43 @@ main {
 .drop-zone {
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 3rem 1rem;
+    padding: 1.5rem 1rem;
     text-align: center;
     color: var(--text-secondary);
     cursor: pointer;
     transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-icon {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+    opacity: 0.85;
+    transition: transform 0.2s, opacity 0.2s;
+}
+
+.drop-zone:hover .upload-icon {
+    transform: translateY(-2px);
+    opacity: 1;
+}
+
+.drop-text {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.browse-btn {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.drop-subtext {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
 }
 
 .drop-zone:hover,
@@ -383,6 +415,70 @@ footer a:hover {
     font-weight: 700;
     color: var(--success);
     font-family: monospace;
+}
+
+/* --- Comparison Metrics Table --- */
+.comparison-metrics-container {
+    margin-top: 1.5rem;
+    padding: 1.25rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.comparison-metrics-container h3 {
+    margin-bottom: 0.85rem;
+    text-align: center;
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.comparison-table th {
+    padding: 10px 14px;
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--accent-hover);
+    font-weight: 700;
+    border-bottom: 2px solid var(--border);
+}
+
+.comparison-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.comparison-table tr:last-child td {
+    border-bottom: none;
+}
+
+/* --- Mode Selector Container & Warning Banner --- */
+.mode-selector-container {
+    margin: 1.2rem 0;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+}
+
+.warning-banner {
+    margin-top: 0.8rem;
+    padding: 0.75rem;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    color: #fbbf24;
+    font-size: 0.88rem;
+    text-align: center;
 }
 
 /* --- Responsive --- */

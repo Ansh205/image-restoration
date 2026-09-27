@@ -1,75 +1,117 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="AI-powered image restoration that automatically detects and fixes noise, blur, low resolution, poor lighting, and compression artifacts.">
+    <meta name="description"
+        content="AI-powered image restoration that automatically detects and fixes noise, blur, low resolution, poor lighting, and compression artifacts.">
     <title>AI Image Restoration & Enhancement</title>
-    <link rel="stylesheet" href="/static/styles.css?v=3">
+    <link rel="stylesheet" href="/static/styles.css?v=6">
 </head>
+
 <body>
     <header>
         <h1>AI Image Restoration & Enhancement</h1>
-        <p class="subtitle">Upload an image — the system automatically detects degradations and restores it.</p>
+        <p>Upload an image — the system automatically detects degradations and restores it.</p>
     </header>
 
-    <main>
+    <main class="container">
         <!-- Upload Section -->
-        <section id="upload-section" class="card">
+        <section class="card upload-section">
             <div id="drop-zone" class="drop-zone">
-                <p>Drag & drop an image here<br>or <strong>click to browse</strong></p>
+                <div class="drop-zone-content">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <p class="drop-text">Drag & drop your image here, or <span class="browse-btn">browse</span></p>
+                    <p class="drop-subtext">Supports JPG, PNG, WebP, BMP (max 10 MB)</p>
+                </div>
                 <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
             </div>
-            <div class="toggle-container" style="margin: 1rem 0; display: flex; align-items: center; gap: 10px; justify-content: center;">
+            <!-- Restoration Mode Selector (Radio Buttons) -->
+            <div class="mode-selector-container"
+                style="margin: 1.2rem 0; padding: 1rem; border: 1px solid var(--border-color, #0c2b54); border-radius: 8px; background: var(--card-bg-subtle, #245586);">
+                <div style="font-weight: 600; margin-bottom: 0.5rem; text-align: center;">Restoration Mode</div>
+                <div style="display: flex; gap: 20px; justify-content: center; align-items: center; flex-wrap: wrap;">
+                    <label
+                        style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="radio" name="restoration_mode" value="default" checked
+                            style="width: 18px; height: 18px; cursor: pointer;">
+                        Default
+                    </label>
+                    <label
+                        style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="radio" name="restoration_mode" value="osdface"
+                            style="width: 18px; height: 18px; cursor: pointer;">
+                        OSDFace
+                    </label>
+                    <label
+                        style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500;">
+                        <input type="radio" name="restoration_mode" value="both"
+                            style="width: 18px; height: 18px; cursor: pointer;">
+                        Both
+                    </label>
+                </div>
+                <div id="osdface-warning" class="warning-banner"
+                    style="display: none; margin-top: 0.8rem; padding: 0.75rem; background: #564a1cf5; border: 1px solid #fcd34d; border-radius: 6px; color: #92400e; font-size: 0.88rem; text-align: center;">
+                    ⚠️ <strong>OSDFace is computationally expensive and may require substantially more GPU memory and
+                        processing time.</strong>
+                </div>
+            </div>
+
+            <div class="toggle-container"
+                style="margin: 1rem 0; display: flex; align-items: center; gap: 10px; justify-content: center;">
                 <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
                     <input type="checkbox" id="upscale-4k-toggle" style="width: 18px; height: 18px; cursor: pointer;">
                     ⚡ AI Upscale to 4K (Real-ESRGAN, max 3840px)
                 </label>
             </div>
-            <button id="upload-btn" class="btn" disabled>Restore Image</button>
+
+            <button id="upload-btn" class="btn primary-btn" disabled>Restore Image</button>
         </section>
 
-        <!-- Analysis Section (hidden until results) -->
-        <section id="analysis-section" class="card hidden">
-            <h2>Image Analysis</h2>
+        <!-- Analysis Section -->
+        <section id="analysis-section" class="card analysis-section hidden">
+            <h2>Image Analysis & Degradation Report</h2>
             <div id="degradation-report"></div>
         </section>
 
-        <!-- Pipeline Section (hidden until processing) -->
-        <section id="pipeline-section" class="card hidden">
-            <h2>Restoration Pipeline</h2>
+        <!-- Pipeline Execution Section -->
+        <section id="pipeline-section" class="card pipeline-section hidden">
+            <h2>Pipeline Execution Flow</h2>
             <div id="pipeline-steps"></div>
         </section>
 
-        <!-- Result Section (hidden until done) -->
-        <section id="result-section" class="card hidden">
+        <!-- Result Section -->
+        <section id="result-section" class="card result-section hidden">
             <h2>Result</h2>
             <div class="toggle-container" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 10px;">
                 <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
-                    <input type="checkbox" id="show-intermediate-toggle" style="width: 18px; height: 18px; cursor: pointer;">
+                    <input type="checkbox" id="show-intermediate-toggle"
+                        style="width: 18px; height: 18px; cursor: pointer;">
                     Show Intermediate Results
                 </label>
             </div>
-            <div id="comparison-view">
-                <div class="image-panel">
-                    <h3>Original</h3>
-                    <img id="original-image" alt="Original image">
-                </div>
-                <div class="image-panel">
-                    <h3>Restored</h3>
-                    <img id="restored-image" alt="Restored image">
-                </div>
+            <div id="comparison-view" class="comparison-view"></div>
+            <div id="metrics-panel" class="metrics-panel"></div>
+            <div id="intermediate-steps-view" class="intermediate-steps-view hidden" style="margin-top: 1.5rem;"></div>
+
+            <div class="action-bar">
+                <a id="download-btn" class="btn primary-btn download-btn" download>Download Restored Image</a>
             </div>
-            <div id="metrics-panel"></div>
-            <button id="download-btn" class="btn">Download Restored Image</button>
         </section>
     </main>
 
     <footer>
-        <p>Built by <a href="https://github.com/Ansh205" target="_blank">Ansh205</a> · 
-           <a href="https://github.com/Ansh205/image-restoration" target="_blank">GitHub</a></p>
+        <p>Built by <a href="https://github.com/Ansh205" target="_blank">Ansh205</a> ·
+            <a href="https://github.com/Ansh205/image-restoration" target="_blank">GitHub</a>
+        </p>
     </footer>
 
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=6"></script>
 </body>
+
 </html>

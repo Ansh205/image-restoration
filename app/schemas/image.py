@@ -56,6 +56,7 @@ class RestorationResponse(BaseModel):
     """Response after restoration is complete."""
     success: bool = True
     image_id: str
+    restoration_mode: str = Field(default="default", description="Restoration mode executed")
     original_meta: ImageMeta
     restored_meta: ImageMeta
     degradations: list[DegradationItem]
@@ -68,3 +69,9 @@ class RestorationResponse(BaseModel):
         description="Before/after quality indicators"
     )
     inference_time_seconds: float = Field(..., description="Total inference time")
+    # Both mode optional results
+    osdface_result: dict | None = Field(
+        default=None,
+        description="OSDFace branch output payload for 'both' restoration mode"
+    )
+
