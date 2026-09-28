@@ -282,7 +282,7 @@ function renderResultComparison(imageId, restoreData, mode) {
     const origUrl = `/api/image/${imageId}`;
     const restoredUrl = `/api/image/restored_${imageId}`;
 
-    // BOTH MODE: Display Standard vs OSDFace Side-by-Side
+    // BOTH MODE: Display Standard vs OSDFace-Assisted Side-by-Side
     if (currentMode === 'both') {
         const osdData = restoreData.osdface_result || {};
         let osdPanelHtml = '';
@@ -290,24 +290,25 @@ function renderResultComparison(imageId, restoreData, mode) {
         if (osdData.skipped) {
             osdPanelHtml = `
                 <div class="image-panel" style="border: 2px dashed #cbd5e1;">
-                    <h3>OSDFACE RESTORATION</h3>
+                    <h3>OSDFACE-ASSISTED RESTORATION</h3>
                     <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">
-                        <p><strong>OSDFace Execution: SKIPPED</strong></p>
+                        <p><strong>OSDFace Pre-Restoration: SKIPPED</strong></p>
                         <p>Reason: ${osdData.reason || 'No face detected'}</p>
                         <p>Faces detected: 0</p>
+                        <p style="margin-top: 8px; font-size: 0.85rem;">Standard 3-pass pipeline executed on original baseline.</p>
                     </div>
                 </div>
             `;
         } else {
             osdPanelHtml = `
                 <div class="image-panel" style="border: 2px solid #3b82f6;">
-                    <h3>OSDFACE RESTORATION</h3>
-                    <img src="${osdData.image_url}" alt="OSDFace Result">
+                    <h3>OSDFACE-ASSISTED RESTORATION</h3>
+                    <img src="${osdData.image_url}" alt="OSDFace-Assisted Result">
                     <div class="image-panel-meta" style="font-size: 0.85rem; margin-top: 6px;">
-                        <p><strong>Model:</strong> ${osdData.model_name || 'OSDFace'}</p>
+                        <p><strong>Pipeline:</strong> OSDFace + Standard 3-Pass</p>
                         <p><strong>Faces Detected:</strong> ${osdData.faces_detected}</p>
-                        <p><strong>Inference:</strong> ${osdData.inference_mode}</p>
-                        <p><strong>Time:</strong> ${osdData.execution_time_seconds}s</p>
+                        <p><strong>OSDFace Evaluator Decision:</strong> <span style="font-weight: 700; color: ${osdData.evaluation_decision === 'KEEP' ? 'var(--success)' : '#ef4444'}">${osdData.evaluation_decision || 'KEEP'}</span></p>
+                        <p><strong>Total Execution Time:</strong> ${osdData.execution_time_seconds}s</p>
                     </div>
                 </div>
             `;
@@ -323,7 +324,7 @@ function renderResultComparison(imageId, restoreData, mode) {
                 <img src="${restoredUrl}" alt="Standard Restoration Result">
                 <div class="image-panel-meta" style="font-size: 0.85rem; margin-top: 6px;">
                     <p><strong>Pipeline Operations:</strong> ${(restoreData.pipeline_steps || []).map(s => s.operation).join(', ') || 'Default'}</p>
-                    <p><strong>Execution Time:</strong> ${restoreData.inference_time_seconds}s</p>
+                    <p><strong>Execution Time:</strong> ${(restoreData.standard_execution_time ?? restoreData.inference_time_seconds).toFixed(2)}s</p>
                 </div>
             </div>
             ${osdPanelHtml}
@@ -366,9 +367,13 @@ function renderResultComparison(imageId, restoreData, mode) {
                             <td>${osdM.mean_absolute_difference ?? 'N/A'}</td>
                         </tr>
                         <tr>
-                            <td style="font-weight: 600;">Execution Time</td>
-                            <td>${restoreData.inference_time_seconds}s</td>
-                            <td>${osdData.execution_time_seconds ?? 'N/A'}s</td>
+                            <td style="font-weight: 600;">Branch Execution Time</td>
+                            <td>${(restoreData.standard_execution_time ?? restoreData.inference_time_seconds).toFixed(2)}s</td>
+                            <td>${(restoreData.osdface_assisted_execution_time ?? osdData.execution_time_seconds ?? 0).toFixed(2)}s</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 600;">Total BOTH Request Time</td>
+                            <td colspan="2" style="text-align: center; font-weight: 700; color: #2563eb;">${(restoreData.total_execution_time ?? restoreData.inference_time_seconds).toFixed(2)}s</td>
                         </tr>
                     </tbody>
                 </table>

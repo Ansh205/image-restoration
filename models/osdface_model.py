@@ -291,6 +291,17 @@ class OSDFaceModel(BaseRestorationModel):
 
         t_pre_start = time.perf_counter()
 
+        # Log Input Color Debug
+        r_in_mean = float(img_rgb[:, :, 0].mean())
+        g_in_mean = float(img_rgb[:, :, 1].mean())
+        b_in_mean = float(img_rgb[:, :, 2].mean())
+
+        logger.info("------------------------------------------------------------")
+        logger.info("[OSDFACE COLOR DEBUG]")
+        logger.info(f"Input Crop Shape: {orig_w}x{orig_h}x3")
+        logger.info(f"Input Color Space: RGB")
+        logger.info(f"Input Means -> R: {r_in_mean:.2f}, G: {g_in_mean:.2f}, B: {b_in_mean:.2f}")
+
         # Preprocessing: Convert to 512x512 standard OSDFace input tensor
         target_size = (512, 512)
         resized_rgb = cv2.resize(img_rgb, target_size, interpolation=cv2.INTER_LANCZOS4)
@@ -323,8 +334,11 @@ class OSDFaceModel(BaseRestorationModel):
             # 5. One-step neural diffusion decoding
             out_raw = self.vre_decoder(latents + proj_spatial * 0.15)
             
-            # Combine neural residual with input face image context (preventing zero-clamping black artifacts)
-            restored_tensor = torch.clamp(in_tensor + out_raw * 0.25, 0.0, 1.0)
+            # Per-channel zero-mean centering: removes raw decoder DC offset to prevent pink/magenta color cast
+            out_raw_centered = out_raw - out_raw.mean(dim=(2, 3), keepdim=True)
+            
+            # Combine high-frequency neural feature residual with input face image context
+            restored_tensor = torch.clamp(in_tensor + out_raw_centered * 0.25, 0.0, 1.0)
 
         t_model_end = time.perf_counter()
         t_post_start = time.perf_counter()
@@ -337,6 +351,26 @@ class OSDFaceModel(BaseRestorationModel):
 
         t_post_end = time.perf_counter()
         t_end = time.perf_counter()
+
+        r_out_mean = float(restored_rgb[:, :, 0].mean())
+        g_out_mean = float(restored_rgb[:, :, 1].mean())
+        b_out_mean = float(restored_rgb[:, :, 2].mean())
+
+        dR = r_out_mean - r_in_mean
+        dG = g_out_mean - g_in_mean
+        dB = b_out_mean - b_in_mean
+
+        logger.info("[OSDFACE COLOR DEBUG — OUTPUT CROP]")
+        logger.info(f"Output Crop Shape: {orig_w}x{orig_h}x3")
+        logger.info(f"Output Color Space: RGB")
+        logger.info(f"Output Means -> R: {r_out_mean:.2f}, G: {g_out_mean:.2f}, B: {b_out_mean:.2f}")
+        logger.info(f"Color Shifts -> dR: {dR:+.2f}, dG: {dG:+.2f}, dB: {dB:+.2f}")
+        logger.info(f"Output Statistics -> Min: {restored_rgb.min()}, Max: {restored_rgb.max()}, Mean: {restored_rgb.mean():.2f}, Std: {restored_rgb.std():.2f}")
+
+        if dR > dG + 8.0 and dB > dG + 8.0:
+            logger.warning("[OSDFACE WARNING] Significant magenta/pink shift detected in restored crop!")
+        elif dR > dG + 8.0:
+            logger.warning("[OSDFACE WARNING] Significant red-channel shift detected in restored crop!")
 
         # Output Statistics Validation
         in_crop_arr = img_rgb.astype(np.float32)

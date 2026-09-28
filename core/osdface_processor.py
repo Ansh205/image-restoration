@@ -4,8 +4,10 @@ OSDFace restoration, and seamless feather-blending back into original images.
 """
 import cv2
 import numpy as np
+from pathlib import Path
 from typing import Tuple, List, Union
 from PIL import Image
+import cv2
 from loguru import logger
 
 from core.face_detector import YuNetFaceDetector
@@ -31,7 +33,7 @@ def get_osdface_model(device: str = "cpu") -> OSDFaceModel:
 class OSDFaceProcessor:
     """
     Processor to execute OSDFace face restoration pipeline on images with 0, 1, or multiple faces.
-    Follows official 512x512 aligned square face cropping and feathered ellipse mask reinsertion.
+    Follows official 512x512 aligned square face cropping and soft feathered face-ellipse mask reinsertion.
     """
 
     def __init__(self, device: str = "cpu"):
@@ -100,6 +102,9 @@ class OSDFaceProcessor:
         model = get_osdface_model(device=self.device)
         output_bgr = image_bgr.copy()
 
+        debug_dir = Path("tests/artifacts")
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
         for idx, (fx, fy, fw, fh) in enumerate(valid_bboxes, start=1):
             logger.info(f"[OSDFACE PROCESS FACE {idx}]")
 
@@ -123,7 +128,7 @@ class OSDFaceProcessor:
 
             logger.info(f"Face {idx} crop region: {x1}:{x2}, {y1}:{y2} (Square patch: {orig_crop_w}x{orig_crop_h})")
 
-            # 3. Model Inference
+            # 3. Model Inference (RGB format internally)
             if is_pil:
                 patch_pil = Image.fromarray(cv2.cvtColor(face_patch_bgr, cv2.COLOR_BGR2RGB))
                 restored_pil = model.predict(patch_pil)
@@ -133,17 +138,29 @@ class OSDFaceProcessor:
 
             rest_h, rest_w = restored_patch_bgr.shape[:2]
 
-            # 4. Feathered Ellipse Mask Blending
+            # 4. Soft Feathered Face-Region Mask Generation
+            # Position mask ellipse over the ACTUAL face bounding box inside the crop
+            fx_rel = fx - x1
+            fy_rel = fy - y1
+            center_x = max(0, min(orig_crop_w, fx_rel + fw // 2))
+            center_y = max(0, min(orig_crop_h, fy_rel + fh // 2))
+            
+            # Radii strictly match actual face dimensions (not the large 1.35x padded crop boundaries)
+            axis_x = max(2, int(fw * 0.45))
+            axis_y = max(2, int(fh * 0.50))
+
             mask = np.zeros((orig_crop_h, orig_crop_w), dtype=np.float32)
             cv2.ellipse(
                 mask,
-                (orig_crop_w // 2, orig_crop_h // 2),
-                (orig_crop_w // 2, orig_crop_h // 2),
+                (center_x, center_y),
+                (axis_x, axis_y),
                 0, 0, 360, 1.0, -1
             )
-            ksize = max(7, (min(orig_crop_w, orig_crop_h) // 6) | 1)
-            mask = cv2.GaussianBlur(mask, (ksize, ksize), 0)
-            mask_3ch = np.dstack([mask] * 3)
+
+            # Feather mask edges with soft Gaussian blur
+            ksize = max(7, (min(fw, fh) // 3) | 1)
+            mask_blurred = cv2.GaussianBlur(mask, (ksize, ksize), 0)
+            mask_3ch = np.dstack([mask_blurred] * 3)
 
             orig_crop_float = output_bgr[y1:y2, x1:x2].astype(np.float32)
             rest_crop_float = restored_patch_bgr.astype(np.float32)
@@ -152,7 +169,15 @@ class OSDFaceProcessor:
             output_bgr[y1:y2, x1:x2] = blended_crop
 
             logger.info(f"[OSDFACE BLEND]")
-            logger.info(f"Face {idx} restored and blended back successfully")
+            logger.info(f"Mask Min: {mask_blurred.min():.4f}, Max: {mask_blurred.max():.4f}, Mean: {mask_blurred.mean():.4f}")
+            logger.info(f"Feather radius (Gaussian kernel): {ksize}x{ksize}")
+            logger.info(f"Face region blended successfully (No hard rectangular mask used)")
+
+            # Save diagnostic debug images for development verification
+            cv2.imwrite(str(debug_dir / f"debug_osdface_input_face_{idx}.png"), face_patch_bgr)
+            cv2.imwrite(str(debug_dir / f"debug_osdface_output_face_{idx}.png"), restored_patch_bgr)
+            cv2.imwrite(str(debug_dir / f"debug_osdface_mask_{idx}.png"), (mask_blurred * 255.0).astype(np.uint8))
+            cv2.imwrite(str(debug_dir / f"debug_osdface_blended_face_{idx}.png"), blended_crop)
 
         logger.info(f"[OSDFACE]")
         logger.info("Final OSDFace output generated")

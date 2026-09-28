@@ -69,9 +69,30 @@ class RestorationResponse(BaseModel):
         description="Before/after quality indicators"
     )
     inference_time_seconds: float = Field(..., description="Total inference time")
+    # Independent branch timing fields
+    standard_execution_time: float | None = Field(
+        default=None,
+        description="Independent execution duration of Standard 3-pass restoration branch"
+    )
+    osdface_assisted_execution_time: float | None = Field(
+        default=None,
+        description="Independent execution duration of OSDFace-Assisted restoration branch"
+    )
+    total_execution_time: float | None = Field(
+        default=None,
+        description="Total duration of the entire restoration API request"
+    )
+    # Phase 2 metadata extensions
+    osdface_metadata: dict | None = Field(
+        default=None,
+        description="Structured OSDFace preprocessing and evaluation metadata"
+    )
+    standard_metadata: dict | None = Field(
+        default=None,
+        description="Structured default 3-pass pipeline execution metadata"
+    )
     # Both mode optional results
     osdface_result: dict | None = Field(
         default=None,
         description="OSDFace branch output payload for 'both' restoration mode"
     )
-

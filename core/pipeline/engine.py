@@ -335,6 +335,7 @@ class RestorationEngine:
         custom_operations: Optional[List[str]] = None,
         upscale_4k: bool = False,
         original_image: Optional[Image.Image] = None,
+        initial_candidate: Optional[Image.Image] = None,
         image_id: str = "",
     ) -> EngineResult:
         """
@@ -349,8 +350,33 @@ class RestorationEngine:
         baseline_image = (original_image or image).copy()
         start_total_time = time.time()
 
-        # candidate starts as baseline/original
-        current_candidate = baseline_image.copy()
+        # Determine initial candidate and candidate source
+        cand_input = initial_candidate or (image if image is not original_image else None)
+        if cand_input is not None:
+            current_candidate = cand_input.copy()
+            initial_candidate_source = "OSDFACE"
+        else:
+            current_candidate = baseline_image.copy()
+            initial_candidate_source = "BASELINE"
+
+        # Compute initial candidate diagnostic metrics vs original baseline
+        orig_eval = baseline_image.convert("RGB")
+        cand_eval = current_candidate.convert("RGB")
+        if orig_eval.size != cand_eval.size:
+            orig_eval = orig_eval.resize(cand_eval.size, Image.Resampling.LANCZOS)
+        
+        orig_np = np.array(orig_eval, dtype=np.float32)
+        cand_np = np.array(cand_eval, dtype=np.float32)
+
+        cand_gray = cv2.cvtColor(cand_np.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        cand_lap = float(cv2.Laplacian(cand_gray, cv2.CV_64F).var())
+        cand_mean = float(np.mean(cand_np))
+        cand_std = float(np.std(cand_np))
+
+        diff = np.abs(cand_np - orig_np)
+        mad_vs_orig = float(np.mean(diff))
+        mse = float(np.mean(diff ** 2))
+        psnr_vs_orig = float(20.0 * np.log10(255.0 / np.sqrt(mse))) if mse > 1e-6 else 99.0
 
         all_step_records = []
         global_step_counter = 1
@@ -363,8 +389,16 @@ class RestorationEngine:
         logger.info("=" * 60)
         logger.info("Starting 3-pass restoration pipeline...")
         logger.info("=" * 60)
-        logger.info(f"[STATE] Baseline image size: {baseline_image.width}x{baseline_image.height}")
-        logger.info(f"[STATE] Initial Candidate = Baseline image")
+        logger.info("[PIPELINE INPUT]")
+        logger.info(f"Original baseline: {baseline_image.width}x{baseline_image.height}")
+        logger.info(f"Initial candidate source: {initial_candidate_source}")
+        logger.info("[INITIAL CANDIDATE]")
+        logger.info(f"Source: {initial_candidate_source}")
+        logger.info(f"Dimensions: {current_candidate.width}x{current_candidate.height}")
+        logger.info(f"Mean: {cand_mean:.2f}, Std: {cand_std:.2f}")
+        logger.info(f"Laplacian: {cand_lap:.2f}")
+        logger.info(f"MAD vs Original: {mad_vs_orig:.3f}")
+        logger.info(f"PSNR vs Original: {psnr_vs_orig:.2f} dB")
 
         # Track execution attempts and effect states per operation
         pass1_analysis = None
